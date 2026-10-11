@@ -18,7 +18,11 @@ Format: [version] — YYYY-MM-DD, then a bulleted list of changes.
   `%APPDATA%\Aether Term\`. The old folder is left untouched. The password
   store keeps its original key-derivation identifiers so saved passwords stay
   readable. *(config.py, passwords.py)*
-- The installer keeps VARA Term's AppId, so it upgrades an existing install.
+- The installer keeps VARA Term's AppId, so it upgrades an existing install
+  in place. It removes the old `VARA Term.exe` and its Start Menu and desktop
+  shortcuts, and puts the new shortcuts under "Aether Term". This was tested
+  by upgrading over a VARA Term installer built from the pre-rebrand script,
+  then uninstalling.
 
 ### Added
 
@@ -78,8 +82,10 @@ Format: [version] — YYYY-MM-DD, then a bulleted list of changes.
 - Connection profiles could not store the Soundmodem (AGWPE) mode.
 - The `OK` that Aether HF sends for the cleanup `DISCONNECT` is now absorbed
   during modem init, so init no longer waits for a 2 s timeout.
-- `build.bat` referenced a spec file that did not exist, and the release
-  workflow passed an unquoted name with a space to PyInstaller.
+- `build.bat` referenced a spec file that did not exist. The release
+  workflow passed an unquoted name with a space to PyInstaller and had no
+  permission to attach its build. It now attaches
+  `Aether_Term_Portable_<version>.zip` to each release.
 
 ---
 

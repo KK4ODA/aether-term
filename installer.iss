@@ -34,6 +34,9 @@ AppUpdatesURL={#MyAppURL}
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
+; An upgrade from VARA Term keeps its install folder, but not its Start Menu
+; group name: shortcuts go under "Aether Term".
+UsePreviousGroup=no
 ; Output installer to dist\ folder
 OutputDir=dist
 OutputBaseFilename=Aether_Term_Setup_{#MyAppVersion}
@@ -63,6 +66,15 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 ; Bundle the entire one-dir output
 Source: "dist\Aether Term\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; NOTE: Don't use "Source: dist\Aether Term\Aether Term.exe" alone — the .exe needs its DLLs
+
+[InstallDelete]
+; Left over from a VARA Term install being upgraded: the old executable and
+; its shortcuts would otherwise keep launching the old version.
+Type: files; Name: "{app}\VARA Term.exe"
+Type: files; Name: "{autoprograms}\VARA Term\VARA Term.lnk"
+Type: files; Name: "{autoprograms}\VARA Term\{cm:UninstallProgram,VARA Term}.lnk"
+Type: dirifempty; Name: "{autoprograms}\VARA Term"
+Type: files; Name: "{autodesktop}\VARA Term.lnk"
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

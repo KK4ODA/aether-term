@@ -4,18 +4,21 @@ on:
   release:
     types: [created]
 
+permissions:
+  contents: write   # attach the build to the release
+
 jobs:
   build:
     runs-on: windows-latest
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Install Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Install dependencies
         run: |
@@ -24,10 +27,11 @@ jobs:
 
       - name: Build executable
         run: |
+          $version = (Get-Content version.txt).Trim()
           pyinstaller --noconfirm aether_term.spec
-          Compress-Archive -Path "dist/Aether Term" -DestinationPath "dist/Aether_Term_Portable.zip"
+          Compress-Archive -Path "dist/Aether Term" -DestinationPath "dist/Aether_Term_Portable_$version.zip"
 
-      - name: Upload executable to release
-        uses: softprops/action-gh-release@v1
+      - name: Upload portable build to release
+        uses: softprops/action-gh-release@v2
         with:
-          files: dist/Aether_Term_Portable.zip
+          files: dist/Aether_Term_Portable_*.zip
