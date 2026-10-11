@@ -38,6 +38,10 @@ running. Nothing is ever locked behind it, and a bug report or an on-air
 report helps just as much.
 <!-- tota-support:end -->
 
+## License
+
+Copyright (C) 2026 KK4ODA. Released under the GNU General Public License v3.0, see [LICENSE](LICENSE). The GPL is required because VARA Term is built on PyQt6, which is licensed under GPL v3.
+
 ## Contributors
 
 - **KK4ODA** (Facundo) — Author
