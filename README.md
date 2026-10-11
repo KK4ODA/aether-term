@@ -26,6 +26,18 @@ A PyQt6 desktop application for connecting to amateur radio BBS systems over VAR
 3. Configure your callsign in Settings > Terminal Setup
 4. Enter the target BBS callsign and click Connect
 
+<!-- tota-support:start -->
+## Support
+
+VARA Term is free and stays free. It is written by KK4ODA, who also runs
+[Tiles on the Air](https://tilesontheair.com), a free program for portable
+operators, and both are kept going by the people who use them. If VARA Term is
+useful to you, a contribution through the
+[Tiles on the Air giving page](https://tilesontheair.com/Giving) helps keep this tool and Tiles
+running. Nothing is ever locked behind it, and a bug report or an on-air
+report helps just as much.
+<!-- tota-support:end -->
+
 ## Contributors
 
 - **KK4ODA** (Facundo) — Author
