@@ -18,7 +18,7 @@ Aether Term is a PyQt6 desktop application for connecting to amateur radio BBS s
   keying or sound card fault), modem identity check, link speed and session bandwidth
 - Automatic HMAC-SHA256 authentication — passwords never go over RF
 - Encrypted Winlink registration (WLREG) for checking email via BBS
-- OmniRig, FLrig and Hamlib rig control / PTT support
+- OmniRig PTT for VARA HF (and Aether HF set to host-program keying)
 - Mode switching with modem auto-launch (VARA FM, VARA HF, Aether HF, Soundmodem)
 - Connection profiles (per-profile operator, tactical address, mode and bandwidth) and
   target history
