@@ -23,7 +23,7 @@ from PyQt6.QtCore import Qt, QTimer, QUrl, pyqtSlot
 
 from config import (Config, APP_NAME, APP_VERSION, MODE_VARA_FM,
                     MODE_VARA_HF, MODE_AETHER_HF, MODE_AGWPE)
-from aether.control import (AetherControl, AetherMonitor, AetherStatus,
+from aether.control import (AetherMonitor, AetherQuery, AetherStatus,
                             find_aether_exe, AETHER_RELEASES_URL,
                             AETHER_HOST_GUIDE_URL)
 from passwords import PasswordStore
@@ -78,7 +78,9 @@ class MainWindow(QMainWindow):
 
         # Aether HF control-API status monitor (only runs in Aether HF mode)
         self.aether = AetherMonitor(self)
+        self.aether_query = AetherQuery(self)   # one-shot checks, off the GUI thread
         self._aether_status: Optional[AetherStatus] = None
+        self._preflight_pending = False
 
         self.setWindowTitle(f"{APP_NAME} — {APP_TAGLINE}")
         self.setMinimumSize(800, 600)
@@ -475,11 +477,32 @@ class MainWindow(QMainWindow):
             self.target_input.setFocus()
             return
 
+        if self._preflight_pending:
+            return
+
+        if self.config.is_aether:
+            # Ask the modem first, on a worker thread; the connect continues
+            # in _on_aether_preflight once it answers (or does not).
+            self._preflight_pending = True
+            self._update_ui_state()
+            self.terminal.display.append_system("[AETHER] Checking the modem...")
+            self.aether_query.snapshot(
+                self.config.aether_control_url,
+                lambda st: self._on_aether_preflight(st, callsign, target))
+            return
+
+        self._begin_connect(callsign, target)
+
+    def _on_aether_preflight(self, st: AetherStatus, callsign: str, target: str):
+        self._preflight_pending = False
+        if self.config.is_aether and self._aether_preflight_ok(st):
+            self._begin_connect(callsign, target)
+        self._update_ui_state()
+
+    def _begin_connect(self, callsign: str, target: str):
+        """Open the modem link and start the call (after any preflight)."""
         mode = self.config.mode
         is_agwpe = (mode == MODE_AGWPE)
-
-        if self.config.is_aether and not self._aether_preflight():
-            return
 
         self.terminal.display.append_system(
             f"Connecting to {target} as {callsign} via {mode}...")
@@ -848,7 +871,7 @@ class MainWindow(QMainWindow):
                                 ConnectionState.INITIALIZING,
                                 ConnectionState.MODEM_CONNECTED)
 
-        self.connect_btn.setEnabled(disconnected)
+        self.connect_btn.setEnabled(disconnected and not self._preflight_pending)
         self.disconnect_btn.setEnabled(not disconnected)
         self.target_input.setEnabled(disconnected)
         self.via1_input.setEnabled(disconnected)
@@ -856,7 +879,7 @@ class MainWindow(QMainWindow):
         self.terminal.set_input_enabled(connected)
 
         # Lock mode switching while any connection activity is happening
-        self.mode_combo.setEnabled(disconnected)
+        self.mode_combo.setEnabled(disconnected and not self._preflight_pending)
 
         # Sync combo selection with config (e.g. after Settings dialog)
         expected_idx = _MODE_INDEX.get(self.config.mode, 0)
@@ -1203,22 +1226,8 @@ class MainWindow(QMainWindow):
         if mode == MODE_AETHER_HF:
             if not self.config.get("aether_auto_launch", False):
                 return
-            configured = self.config.get("aether_exe_path", "")
-            exe = find_aether_exe(configured)
-            if self._aether_already_running():
-                self.terminal.display.append_system(
-                    "Aether HF is already running — not starting another")
-                return
-            proc = self._start_modem_exe(exe, "Aether HF")
-            if proc:
-                self.terminal.display.append_system("Launched Aether HF")
-                if exe != configured:
-                    self.config.set("aether_exe_path", exe)
-            else:
-                self.terminal.display.append_warning(
-                    "Aether HF not found.\n"
-                    "  Install it from " + AETHER_RELEASES_URL + "\n"
-                    "  or set its path in Settings > Modem Configuration.")
+            self.aether_query.snapshot(self.config.aether_control_url,
+                                       self._launch_aether_unless_running)
             return
 
         if mode == MODE_AGWPE:
@@ -1255,6 +1264,27 @@ class MainWindow(QMainWindow):
             self.terminal.display.append_warning(
                 f"{mode_label} modem not found.\n"
                 "  Set the executable path in Settings > Modem Configuration.")
+
+    def _launch_aether_unless_running(self, st: AetherStatus):
+        """Start Aether HF unless its control API already answers."""
+        if not self.config.is_aether:
+            return
+        if st.reachable:
+            self.terminal.display.append_system(
+                "Aether HF is already running — not starting another")
+            return
+        configured = self.config.get("aether_exe_path", "")
+        exe = find_aether_exe(configured)
+        proc = self._start_modem_exe(exe, "Aether HF")
+        if proc:
+            self.terminal.display.append_system("Launched Aether HF")
+            if exe != configured:
+                self.config.set("aether_exe_path", exe)
+        else:
+            self.terminal.display.append_warning(
+                "Aether HF not found.\n"
+                "  Install it from " + AETHER_RELEASES_URL + "\n"
+                "  or set its path in Settings > Modem Configuration.")
 
     def _start_modem_exe(self, exe_path: str, label: str) -> Optional[subprocess.Popen]:
         """Start a modem executable and track the process."""
@@ -1463,13 +1493,7 @@ class MainWindow(QMainWindow):
             color = C["success"]
         self.aether_label.setStyleSheet(f"color: {color}; font-weight: bold;")
 
-    def _aether_snapshot(self) -> AetherStatus:
-        return AetherControl(self.config.aether_control_url).snapshot()
-
-    def _aether_already_running(self) -> bool:
-        return self._aether_snapshot().reachable
-
-    def _aether_preflight(self) -> bool:
+    def _aether_preflight_ok(self, st: AetherStatus) -> bool:
         """Check Aether HF can take the call. Returns False to stop here.
 
         The VARA command set cannot say *why* a modem refuses a call, so
@@ -1477,7 +1501,6 @@ class MainWindow(QMainWindow):
         no rules chosen, or a keying fault are reported in plain words
         before anything is sent.
         """
-        st = self._aether_snapshot()
         if not st.reachable:
             self.terminal.display.append_warning(
                 "[AETHER] Control API not reachable at "
@@ -1502,13 +1525,17 @@ class MainWindow(QMainWindow):
 
     def _explain_aether_no_session(self):
         """The call ended without a session — say why, if the modem knows."""
-        st = self._aether_snapshot()
+        target = getattr(self, "_target", "the target")
+        self.aether_query.snapshot(
+            self.config.aether_control_url,
+            lambda st: self._explain_aether_no_session_with(st, target))
+
+    def _explain_aether_no_session_with(self, st: AetherStatus, target: str):
         problems = st.problems if st.reachable else []
         if problems:
             for p in problems:
                 self.terminal.display.append_error(f"[AETHER] {p}")
             return
-        target = getattr(self, "_target", "the target")
         self.terminal.display.append_warning(
             f"[AETHER] No session with {target}. Aether HF talks only to other\n"
             "  Aether HF stations, on the same bandwidth and link protocol\n"
@@ -1525,7 +1552,10 @@ class MainWindow(QMainWindow):
             self.terminal.display.append_success(f"[AETHER] Modem: {version}")
 
     def _show_aether_status(self):
-        st = self._aether_snapshot()
+        self.aether_query.snapshot(self.config.aether_control_url,
+                                   self._show_aether_status_with)
+
+    def _show_aether_status_with(self, st: AetherStatus):
         url = self.config.aether_control_url
         if not st.reachable:
             QMessageBox.information(
@@ -1660,8 +1690,7 @@ class MainWindow(QMainWindow):
 
     def _on_update_available(self, check_result):
         self._pending_update = check_result
-        n = len(check_result.commits)
-        self._update_label.setText(f"UPDATE ({n})")
+        self._update_label.setText(check_result.label)
         self._update_label.show()
 
     def _show_update_dialog(self):
@@ -1679,10 +1708,7 @@ class MainWindow(QMainWindow):
     def _check_for_updates(self):
         """Manual 'Check for Updates' from Help menu."""
         if not self._updater:
-            QMessageBox.information(
-                self, "Updates",
-                "Updater not available (not a git repository).",
-            )
+            QMessageBox.information(self, "Updates", "Updater not available.")
             return
         self.status_bar.showMessage("Checking for updates...", 5000)
         self._updater.check_once_async()

@@ -97,9 +97,29 @@ Details of the protocol mapping are in [`docs/AETHER_HF.md`](docs/AETHER_HF.md).
   point an existing clone at the new name:
   `git remote set-url origin https://github.com/KK4ODA/aether-term.git`
 
-## Building
+## Updates
+
+- **Git installs** (the one-line installer, or a clone) pull the latest `main` and restart on
+  startup.
+- **Installer and portable builds** check the latest
+  [GitHub release](https://github.com/KK4ODA/aether-term/releases) on startup. When there is a
+  newer one, **UPDATE vX.Y.Z** appears in the status bar and opens its download page.
+
+Turn the startup check off with `check_updates_on_startup` in `settings.json`. **Help → Check for
+Updates** checks on demand.
+
+## Building and testing
 
 See [`docs/BUILD_GUIDE.md`](docs/BUILD_GUIDE.md) for the Windows installer and portable build.
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest
+```
+
+The tests run the real main window offscreen against a fake Aether HF daemon
+(`tests/fake_aetherd.py`). They use a temporary settings folder and never touch your own settings,
+keyring or radio. CI runs them on Windows and Ubuntu.
 
 <!-- tota-support:start -->
 ## Support

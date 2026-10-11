@@ -1,7 +1,9 @@
 """
 gui/update_dialog.py — Dialog shown when a software update is available.
 
-Displays the commit log of what's new and offers Update & Restart / Later.
+Git installs: shows the commit log and offers Update & Restart / Later.
+Installed builds: shows the release notes and opens the release's download
+page, since the new installer is what updates them.
 """
 
 import logging
@@ -10,7 +12,8 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit,
     QPushButton, QProgressBar,
 )
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import pyqtSignal, QUrl
+from PyQt6.QtGui import QDesktopServices
 
 from config import APP_VERSION
 from gui.theme import C
@@ -35,6 +38,9 @@ class UpdateDialog(QDialog):
         self._build_ui()
 
     def _build_ui(self):
+        if getattr(self._result, "mode", "git") == "release":
+            self._build_release_ui()
+            return
         layout = QVBoxLayout(self)
 
         from updater import get_git_hash
@@ -94,6 +100,42 @@ class UpdateDialog(QDialog):
         btn_row.addWidget(self._update_btn)
 
         layout.addLayout(btn_row)
+
+    def _build_release_ui(self):
+        r = self._result
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(f"Current version:  v{APP_VERSION}"))
+        layout.addWidget(QLabel(f"Latest release:   <b>{r.release_name or r.release_tag}</b>"))
+        layout.addSpacing(8)
+        if r.release_notes:
+            notes = QTextEdit()
+            notes.setReadOnly(True)
+            notes.setMarkdown(r.release_notes)
+            notes.setMinimumHeight(180)
+            layout.addWidget(notes)
+        layout.addWidget(QLabel(
+            "Download and run the new installer (or portable zip). "
+            "Settings and saved passwords are kept."))
+        self._status = QLabel("")
+        layout.addWidget(self._status)
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        self._later_btn = QPushButton("Later")
+        self._later_btn.clicked.connect(self.reject)
+        btn_row.addWidget(self._later_btn)
+        self._update_btn = QPushButton("Open Download Page")
+        self._update_btn.setDefault(True)
+        self._update_btn.setStyleSheet(
+            f"background-color:{C['accent']}; color:white; padding:6px 18px;"
+            f"border-radius:4px; font-weight:bold;"
+        )
+        self._update_btn.clicked.connect(self._open_release_page)
+        btn_row.addWidget(self._update_btn)
+        layout.addLayout(btn_row)
+
+    def _open_release_page(self):
+        QDesktopServices.openUrl(QUrl(self._result.release_url))
+        self.accept()
 
     def _on_update_clicked(self):
         self._update_btn.setEnabled(False)

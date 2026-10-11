@@ -479,10 +479,18 @@ class SettingsDialog(QDialog):
 
     def _test_aether(self):
         """Query the Aether HF control API and show what it says."""
-        from aether.control import AetherControl, AETHER_RELEASES_URL
+        from aether.control import AetherQuery
         host = self.aether_host.text().strip() or "127.0.0.1"
         url = f"http://{host}:{self.aether_control_port.value()}"
-        snap = AetherControl(url).snapshot()
+        if not hasattr(self, "_aether_query"):
+            self._aether_query = AetherQuery(self)
+        self.aether_test_btn.setEnabled(False)
+        self.aether_test_result.setText(f"Asking {url} ...")
+        self._aether_query.snapshot(url, lambda snap: self._show_aether_test(snap, url))
+
+    def _show_aether_test(self, snap, url: str):
+        from aether.control import AETHER_RELEASES_URL
+        self.aether_test_btn.setEnabled(True)
         if not snap.reachable:
             self.aether_test_result.setText(
                 f"Not reachable at {url}. Is Aether HF running?\n"

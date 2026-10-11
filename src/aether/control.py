@@ -222,6 +222,42 @@ class AetherControl:
             return AetherStatus(reachable=False, error=str(e))
 
 
+class AetherQuery(QObject):
+    """One-shot status queries off the GUI thread.
+
+    ``snapshot(url, callback)`` asks the modem on a worker thread and calls
+    ``callback(AetherStatus)`` back on the thread this object lives in (the
+    GUI thread), so a slow or unreachable modem never freezes the window.
+    """
+
+    _done = pyqtSignal(int, object)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._callbacks: Dict[int, Any] = {}
+        self._next = 0
+        self._done.connect(self._dispatch)
+
+    def snapshot(self, base_url: str, callback) -> None:
+        self._next += 1
+        token = self._next
+        self._callbacks[token] = callback
+
+        def work():
+            self._done.emit(token, AetherControl(base_url).snapshot())
+
+        threading.Thread(target=work, daemon=True, name="AetherQuery").start()
+
+    @property
+    def pending(self) -> int:
+        return len(self._callbacks)
+
+    def _dispatch(self, token: int, status: "AetherStatus"):
+        cb = self._callbacks.pop(token, None)
+        if cb is not None:
+            cb(status)
+
+
 class AetherMonitor(QObject):
     """Polls the modem's status in a background thread while running.
 

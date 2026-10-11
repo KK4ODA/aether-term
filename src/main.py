@@ -75,11 +75,13 @@ def main():
         # Load configuration
         config = Config()
 
-        # Auto-update before GUI launch — pull and restart if updates found
-        if config.get("check_updates_on_startup", True):
+        from updater import Updater
+        updater = Updater(config)
+
+        # Git installs: pull and restart before the GUI launches.
+        # Installed builds are checked in the background once the window is up.
+        if config.get("check_updates_on_startup", True) and updater.is_git:
             try:
-                from updater import Updater
-                updater = Updater(config)
                 result = updater.check_for_updates()
                 if result.update_available:
                     n = len(result.commits)
@@ -105,10 +107,10 @@ def main():
         window = MainWindow(config, password_store)
         window.show()
 
-        # Updater for manual checks via Help menu
-        from updater import Updater
-        updater = Updater(config)
+        # Updater for manual checks via Help menu, and the release check
         window.set_updater(updater)
+        if config.get("check_updates_on_startup", True) and not updater.is_git:
+            updater.check_once_async()
 
         log.info("Aether Term GUI launched")
         sys.exit(app.exec())

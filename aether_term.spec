@@ -49,6 +49,8 @@ hiddenimports = [
     'gui.password_dialog',
     'gui.profile_dialog',
     'gui.theme',
+    'gui.update_dialog',
+    'updater',
     'vara',
     'vara.modem',
     'vara.connection',

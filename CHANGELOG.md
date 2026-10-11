@@ -47,6 +47,16 @@ Format: [version] — YYYY-MM-DD, then a bulleted list of changes.
   is set to "host program". By default Aether HF keys the radio itself, and
   its regulatory check stays on.
 - `docs/AETHER_HF.md` documents the protocol mapping.
+- **Updates for installed builds.** The installer and portable builds have no
+  `.git`, so the git-based updater could never update them. They now check the
+  latest GitHub release on startup, show `UPDATE vX.Y.Z` in the status bar,
+  and open the release's download page with its notes. Git installs still
+  pull and restart as before. *(updater.py, gui/update_dialog.py, main.py)*
+- **Test suite and CI.** `tests/` has 57 pytest tests: settings migration,
+  the event parser, the Aether HF control client, the release updater, and the
+  main window end to end against a fake Aether HF daemon
+  (`tests/fake_aetherd.py`). They run on Windows and Ubuntu on every push and
+  pull request (`.github/workflows/tests.yml`).
 - README: a Support section (Tiles on the Air giving page) and the GPL v3
   license statement. The GitHub Sponsor button points at the same page.
 
@@ -57,6 +67,12 @@ Format: [version] — YYYY-MM-DD, then a bulleted list of changes.
 
 ### Fixed
 
+- Aether HF status checks (before a call, after a refused call, the status
+  dialog, auto-launch and the Settings test button) run on a worker thread.
+  A slow or unreachable modem no longer freezes the window, and Connect stays
+  disabled while the check is out.
+- `pywin32` is installed only on Windows, so `pip install -r requirements.txt`
+  works on Linux.
 - The toolbar mode selector snapped back to VARA FM after closing Settings
   while Soundmodem was selected.
 - Connection profiles could not store the Soundmodem (AGWPE) mode.
