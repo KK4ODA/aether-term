@@ -47,6 +47,13 @@ Format: [version] — YYYY-MM-DD, then a bulleted list of changes.
   is set to "host program". By default Aether HF keys the radio itself, and
   its regulatory check stays on.
 - `docs/AETHER_HF.md` documents the protocol mapping.
+- README: a Support section (Tiles on the Air giving page) and the GPL v3
+  license statement. The GitHub Sponsor button points at the same page.
+
+### Documentation
+
+- README, build guide, release checklist and the GitHub Pages install page
+  rewritten for the new name, Aether HF setup, and upgrading from VARA Term.
 
 ### Fixed
 
@@ -57,6 +64,60 @@ Format: [version] — YYYY-MM-DD, then a bulleted list of changes.
   during modem init, so init no longer waits for a 2 s timeout.
 - `build.bat` referenced a spec file that did not exist, and the release
   workflow passed an unquoted name with a space to PyInstaller.
+
+---
+
+## [1.0.3] — 2026-04-11
+
+`version.txt` read 1.0.3 from the first commit, and these changes went in
+without a version bump. They are collected here from the commit history.
+
+### Added
+
+- **Encrypted Winlink registration (WLREG)**: the Winlink password is asked
+  for locally and sent encrypted with the BBS password and a nonce, never
+  in clear over RF.
+- **Soundmodem / AGWPE transport**: AX.25 packet via Soundmodem, Direwolf or
+  any AGWPE-compatible TNC, as a third mode in the toolbar with auto-launch.
+- **Git-based auto-updater**: checks GitHub on startup, pulls and restarts
+  before the GUI opens, and has a status-bar indicator and an update dialog
+  (Help → Check for Updates). Local changes are stashed before pulling.
+- **Operator profiles**: profiles carry their own callsign and SSID. Station
+  passwords are stored per operator (`OPERATOR@TARGET`); old target-only
+  entries still work.
+- **Tactical addresses**: a profile can send `;TACTICAL <call>` after
+  authentication, and `;TACTICAL OK/FAIL` replies are shown.
+- BBS transport detection (`;TRANSPORT?` after connect) and a chat-room
+  indicator in the status bar.
+- One-command Windows setup (`setup_term.bat`) that installs Git and Python
+  through winget when missing, and a GitHub Pages install page.
+- OmniRig availability check at startup.
+- Modem connect retry (5 attempts, 2 s apart) for modems that start slowly.
+- Clear button, tooltips on all non-obvious settings, richer profile labels,
+  and an updated BBS commands reference (S/SW, KA, WL, TACTICAL).
+
+### Changed
+
+- Renamed VTerm → VARA Term, with data under `%APPDATA%\VARA Term`.
+- FM bandwidth defaults to WIDE; profiles store it.
+- Default HF PTT method is OmniRig.
+- The data port is read-only in Settings (always command port + 1).
+- 1.5 s turnaround delay before the HMAC auth response.
+
+### Fixed
+
+- HF init race: `CONNECT` now waits for init to finish instead of a fixed
+  4 s timer.
+- `LISTEN OFF` removed from modem init; it broke data flow.
+- Modem process trees are killed on exit (`taskkill /F /T`).
+- Clean modem disconnect when switching between FM and HF.
+- Elecraft K4 Hamlib model ID (2048 → 2047).
+- FLrig PTT verification always returned success; its XML-RPC calls now
+  time out.
+- Signals left blocked after an exception; Hamlib download worker not
+  cleaned up on dialog close; session log file leak.
+- Empty commands are no longer sent over RF.
+- PTT-disabled warnings in FM mode are logged at debug level.
 
 ---
 
