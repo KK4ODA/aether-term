@@ -1,8 +1,16 @@
 name: Build Aether Term Release
 
 on:
+  # "published", not "created": a release made as a draft first (as
+  # `gh release create` does when it uploads files) never fires "created".
   release:
-    types: [created]
+    types: [published]
+  # Build and attach to an existing release by hand: Actions → Run workflow
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build and attach to (e.g. v1.1.0)"
+        required: true
 
 permissions:
   contents: write   # attach the build to the release
@@ -10,10 +18,14 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
 
       - name: Install Python
         uses: actions/setup-python@v5
@@ -34,4 +46,5 @@ jobs:
       - name: Upload portable build to release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.TAG }}
           files: dist/Aether_Term_Portable_*.zip
