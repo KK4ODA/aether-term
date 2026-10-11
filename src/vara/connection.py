@@ -1,5 +1,5 @@
 """
-vara/connection.py — Connection state machine for VARA Term.
+vara/connection.py — Connection state machine for Aether Term.
 
 Tracks the lifecycle: IDLE → CONNECTING → CONNECTED → DISCONNECTING → IDLE
 """

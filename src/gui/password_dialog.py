@@ -1,5 +1,5 @@
 """
-gui/password_dialog.py — Password manager dialog for VARA Term.
+gui/password_dialog.py — Password manager dialog for Aether Term.
 
 Manages per-station passwords for HMAC-SHA256 authentication.
 Passwords are keyed by ``OPERATOR@TARGET`` (per-operator) or just

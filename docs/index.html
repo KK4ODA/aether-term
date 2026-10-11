@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VARA Term - VARA BBS Terminal Client</title>
+    <title>Aether Term - BBS Terminal Client for VARA and Aether HF</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -182,10 +182,11 @@
 </head>
 <body>
     <div class="container">
-        <h1>VARA <span>Term</span></h1>
+        <h1>Aether <span>Term</span></h1>
         <p class="subtitle">
-            VARA BBS Terminal Client &mdash; connect to amateur radio BBS systems
-            over VARA FM, VARA HF, and Soundmodem.
+            BBS terminal client &mdash; connect to amateur radio BBS systems
+            over the open-source Aether HF modem, VARA HF, VARA FM, and Soundmodem.
+            <br><em>Formerly VARA Term.</em>
             <br>By <span class="callsign">KK4ODA</span>
         </p>
 
@@ -196,7 +197,7 @@
             </p>
             <div class="install-box">
                 <div class="label">PowerShell (right-click to paste)</div>
-                <code id="ps-cmd" onclick="copyCmd()">irm https://raw.githubusercontent.com/KK4ODA/vara-term/main/setup_term.bat -OutFile $env:TEMP\setup_term.bat; & $env:TEMP\setup_term.bat</code>
+                <code id="ps-cmd" onclick="copyCmd()">irm https://raw.githubusercontent.com/KK4ODA/aether-term/main/setup_term.bat -OutFile $env:TEMP\setup_term.bat; & $env:TEMP\setup_term.bat</code>
             </div>
             <button class="copy-btn" id="copy-btn" onclick="copyCmd()">
                 Copy to Clipboard
@@ -204,7 +205,7 @@
 
             <div class="or-divider">&mdash; or &mdash;</div>
             <a class="download-link"
-               href="https://raw.githubusercontent.com/KK4ODA/vara-term/main/setup_term.bat"
+               href="https://raw.githubusercontent.com/KK4ODA/aether-term/main/setup_term.bat"
                download="setup_term.bat">
                 Download setup_term.bat directly
             </a>
@@ -224,7 +225,7 @@
                 <div class="step-num">2</div>
                 <div class="step-text">
                     <strong>Clones the repository</strong> &mdash; downloads the
-                    latest VARA Term source code from GitHub.
+                    latest Aether Term source code from GitHub.
                 </div>
             </div>
             <div class="step">
@@ -238,7 +239,7 @@
                 <div class="step-num">4</div>
                 <div class="step-text">
                     <strong>Creates a desktop shortcut</strong> &mdash; double-click
-                    "VARA TERM" to launch. Updates are checked automatically
+                    "AETHER TERM" to launch. Updates are checked automatically
                     on every startup.
                 </div>
             </div>
@@ -247,6 +248,7 @@
         <div class="features">
             <h2>Features</h2>
             <ul>
+                <li>Aether HF modem support: live status, rules and fault checks before every call</li>
                 <li>VARA FM and VARA HF modem support</li>
                 <li>Soundmodem / AGWPE packet radio transport</li>
                 <li>HMAC-SHA256 secure authentication (password never sent over RF)</li>
@@ -266,10 +268,19 @@
             <strong>After install:</strong> Configure your callsign in
             Settings &gt; Terminal Setup, enter the target BBS callsign,
             and click Connect.
+            <br><br>
+            <strong>Aether HF:</strong> install it from its
+            <a class="download-link" href="https://github.com/KK4ODA/aether-hf/releases">releases page</a>,
+            turn on <em>Host programs</em> in its Setup step 5, and pick
+            <em>Aether HF</em> in Aether Term's toolbar. Aether HF talks only to other
+            Aether HF stations on the air.
+            <br><br>
+            <strong>Upgrading from VARA Term:</strong> your settings and saved
+            passwords are carried over automatically on first start.
         </div>
 
         <div class="footer">
-            <a href="https://github.com/KK4ODA/vara-term">GitHub Repository</a>
+            <a href="https://github.com/KK4ODA/aether-term">GitHub Repository</a>
             &nbsp;&middot;&nbsp;
             Built with Python and PyQt6
             &nbsp;&middot;&nbsp;

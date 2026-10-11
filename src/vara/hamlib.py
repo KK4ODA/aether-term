@@ -1,5 +1,5 @@
 """
-vara/hamlib.py — Thread-safe Hamlib (rigctld) client for VARA Term.
+vara/hamlib.py — Thread-safe Hamlib (rigctld) client for Aether Term.
 
 Communicates with Hamlib's rigctld daemon over TCP using the "Extended
 Response Protocol" for reliable parsing.  Provides CAT control: frequency,
@@ -9,7 +9,7 @@ Architecture mirrors OmniRig: all network I/O happens on a single dedicated
 thread; public methods are thread-safe, queueing commands and blocking
 until the I/O thread completes them.
 
-rigctld can be launched automatically by VARA Term or managed externally.
+rigctld can be launched automatically by Aether Term or managed externally.
 
 Usage:
     client = HamlibClient(host="127.0.0.1", port=4532)
@@ -230,13 +230,13 @@ class HamlibClient:
         if os.name == "nt":
             candidates = []
 
-            # 2. VARA Term's own download directory (%APPDATA%/VARA Term/hamlib/bin)
+            # 2. Aether Term's own download directory (%APPDATA%/Aether Term/hamlib/bin)
             appdata = os.environ.get("APPDATA", "")
             if appdata:
                 candidates.append(
-                    Path(appdata) / "VARA Term" / "hamlib" / "bin" / "rigctld.exe")
+                    Path(appdata) / "Aether Term" / "hamlib" / "bin" / "rigctld.exe")
 
-            # 3. VARA Term exe subdirectory (portable installs)
+            # 3. Aether Term exe subdirectory (portable installs)
             try:
                 from _frozen import EXE_DIR
                 candidates.append(EXE_DIR / "hamlib" / "bin" / "rigctld.exe")

@@ -1,5 +1,5 @@
 """
-passwords.py — Secure password storage for VARA Term.
+passwords.py — Secure password storage for Aether Term.
 
 Stores per-station passwords encrypted with Fernet (AES-128-CBC)
 derived from a master passphrase.  Optionally uses the OS keyring
@@ -32,6 +32,9 @@ except ImportError:
     HAS_FERNET = False
 
 
+# These identifiers predate the rename to Aether Term.  They are part of the
+# key derivation and the OS keyring lookup, so changing them would make every
+# saved station password unreadable.  Keep them as they are.
 _SERVICE_NAME = "VARA Term"
 _KEYRING_KEY = "vterm_master_key"
 

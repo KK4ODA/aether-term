@@ -1,8 +1,9 @@
 """
-gui/main_window.py — Main application window for VARA Term.
+gui/main_window.py — Main application window for Aether Term.
 
 Ties together the terminal, connection bar, macro buttons, status bar,
-VARA modem interface, and authentication interceptor.
+modem interface (VARA FM/HF, Aether HF, AGWPE), the Aether HF status
+monitor, and the authentication interceptor.
 """
 
 import logging
@@ -17,10 +18,14 @@ from PyQt6.QtWidgets import (
     QLabel, QLineEdit, QPushButton, QComboBox, QStatusBar,
     QMenuBar, QMenu, QFrame, QMessageBox, QInputDialog,
 )
-from PyQt6.QtGui import QAction, QFont, QColor
-from PyQt6.QtCore import Qt, QTimer, pyqtSlot
+from PyQt6.QtGui import QAction, QFont, QColor, QDesktopServices
+from PyQt6.QtCore import Qt, QTimer, QUrl, pyqtSlot
 
-from config import Config, APP_NAME, APP_VERSION
+from config import (Config, APP_NAME, APP_VERSION, MODE_VARA_FM,
+                    MODE_VARA_HF, MODE_AETHER_HF, MODE_AGWPE)
+from aether.control import (AetherControl, AetherMonitor, AetherStatus,
+                            find_aether_exe, AETHER_RELEASES_URL,
+                            AETHER_HOST_GUIDE_URL)
 from passwords import PasswordStore
 from auth import AuthInterceptor
 from vara.modem import VARAModem
@@ -36,9 +41,21 @@ from gui.profile_dialog import ProfileDialog
 
 log = logging.getLogger(__name__)
 
+APP_TAGLINE = "BBS Terminal Client for VARA and Aether HF"
+
+# Toolbar mode combo: (label, config value), in index order
+_MODES = [
+    ("VARA FM", MODE_VARA_FM),
+    ("VARA HF", MODE_VARA_HF),
+    ("Aether HF", MODE_AETHER_HF),
+    ("Soundmodem", MODE_AGWPE),
+]
+_MODE_INDEX = {value: i for i, (_, value) in enumerate(_MODES)}
+_MODE_LABEL = {MODE_AGWPE: "Soundmodem (AGWPE)"}
+
 
 class MainWindow(QMainWindow):
-    """VARA Term main application window."""
+    """Aether Term main application window."""
 
     def __init__(self, config: Config, password_store: PasswordStore):
         super().__init__()
@@ -47,7 +64,7 @@ class MainWindow(QMainWindow):
         self.modem = VARAModem()
         self.auth = AuthInterceptor()
         self.ptt = PTTController()
-        self._modem_procs: list = []   # tracked VARA modem subprocesses
+        self._modem_procs: list = []   # tracked modem subprocesses
         self._connect_in_progress = False  # True while connect sequence is running
         self._cleanup_timer = QTimer(self)  # cancellable modem cleanup timer
         self._cleanup_timer.setSingleShot(True)
@@ -57,8 +74,13 @@ class MainWindow(QMainWindow):
         self._session_start: Optional[datetime] = None
         self._data_buffer = ""
         self._active_profile: Optional[dict] = None
+        self._rf_session_up = False    # a CONNECTED was seen for this call
 
-        self.setWindowTitle(f"{APP_NAME} — VARA BBS Terminal Client")
+        # Aether HF control-API status monitor (only runs in Aether HF mode)
+        self.aether = AetherMonitor(self)
+        self._aether_status: Optional[AetherStatus] = None
+
+        self.setWindowTitle(f"{APP_NAME} — {APP_TAGLINE}")
         self.setMinimumSize(800, 600)
         self.resize(950, 700)
 
@@ -81,7 +103,11 @@ class MainWindow(QMainWindow):
         self._update_ui_state()
         self._show_welcome()
 
-        # Auto-launch VARA modem(s) at startup
+        self.aether.status_updated.connect(
+            self._on_aether_status, Qt.ConnectionType.QueuedConnection)
+        self._sync_aether_monitor()
+
+        # Auto-launch the selected modem at startup
         QTimer.singleShot(500, self._launch_modem_processes)
 
     # ── Build UI ───────────────────────────────────────────────────
@@ -127,9 +153,27 @@ class MainWindow(QMainWindow):
         profiles_action.triggered.connect(self._open_profiles)
         settings_menu.addAction(profiles_action)
 
+        # Aether HF
+        aether_menu = menubar.addMenu("&Aether HF")
+        ae_status = QAction("Modem &Status...", self)
+        ae_status.triggered.connect(self._show_aether_status)
+        aether_menu.addAction(ae_status)
+        ae_panel = QAction("Open Station &Panel in Browser", self)
+        ae_panel.triggered.connect(self._open_aether_panel)
+        aether_menu.addAction(ae_panel)
+        aether_menu.addSeparator()
+        ae_guide = QAction("Host Program Setup &Guide", self)
+        ae_guide.triggered.connect(
+            lambda: QDesktopServices.openUrl(QUrl(AETHER_HOST_GUIDE_URL)))
+        aether_menu.addAction(ae_guide)
+        ae_dl = QAction("&Download Aether HF", self)
+        ae_dl.triggered.connect(
+            lambda: QDesktopServices.openUrl(QUrl(AETHER_RELEASES_URL)))
+        aether_menu.addAction(ae_dl)
+
         # Help
         help_menu = menubar.addMenu("&Help")
-        about_action = QAction("&About VARA Term", self)
+        about_action = QAction(f"&About {APP_NAME}", self)
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
 
@@ -221,10 +265,11 @@ class MainWindow(QMainWindow):
 
         self.mode_combo = QComboBox()
         self.mode_combo.setObjectName("modeCombo")
-        self.mode_combo.setToolTip("Switch between VARA FM, VARA HF, and\nSoundmodem (AGWPE) transport modes.")
-        self.mode_combo.addItems(["VARA FM", "VARA HF", "Soundmodem"])
-        _mode_map = {"VARA FM": 0, "VARA HF": 1, "AGWPE": 2}
-        self.mode_combo.setCurrentIndex(_mode_map.get(self.config.get("vara_mode", "VARA FM"), 0))
+        self.mode_combo.setToolTip(
+            "Switch between VARA FM, VARA HF, Aether HF and\n"
+            "Soundmodem (AGWPE) transport modes.")
+        self.mode_combo.addItems([label for label, _ in _MODES])
+        self.mode_combo.setCurrentIndex(_MODE_INDEX.get(self.config.mode, 0))
         self.mode_combo.currentIndexChanged.connect(self._on_mode_switched)
         row2.addWidget(self.mode_combo)
 
@@ -311,7 +356,7 @@ class MainWindow(QMainWindow):
         self.status_bar.addWidget(self._sep())
 
         self.sn_label = QLabel("S/N: —")
-        self.sn_label.setToolTip("Signal-to-Noise ratio reported by VARA modem.\nHigher values = better signal quality.")
+        self.sn_label.setToolTip("Signal-to-Noise ratio reported by the modem.\nHigher values = better signal quality.")
         self.status_bar.addWidget(self.sn_label)
 
         self.status_bar.addWidget(self._sep())
@@ -322,6 +367,12 @@ class MainWindow(QMainWindow):
 
         self.status_bar.addWidget(self._sep())
 
+        self.speed_label = QLabel("Speed: —")
+        self.speed_label.setToolTip("Link speed reported by the modem (BITRATE).")
+        self.status_bar.addWidget(self.speed_label)
+
+        self.status_bar.addWidget(self._sep())
+
         self.duration_label = QLabel("Duration: 00:00:00")
         self.status_bar.addWidget(self.duration_label)
 
@@ -329,6 +380,14 @@ class MainWindow(QMainWindow):
 
         self.modem_status_label = QLabel("Modem: Not connected")
         self.status_bar.addPermanentWidget(self.modem_status_label)
+
+        # Aether HF status from its control API (hidden in other modes)
+        self.aether_label = QLabel("")
+        self.aether_label.setToolTip("Aether HF modem status (control API).\nClick for details.")
+        self.aether_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.aether_label.mousePressEvent = lambda _ev: self._show_aether_status()
+        self.aether_label.hide()
+        self.status_bar.addPermanentWidget(self.aether_label)
 
         self.ptt_label = QLabel("")
         self.ptt_label.setStyleSheet("font-weight: bold;")
@@ -379,6 +438,16 @@ class MainWindow(QMainWindow):
         self.modem.busy_signal.connect(
             lambda: self.terminal.display.append_warning("Remote station is busy"),
             Qt.ConnectionType.QueuedConnection)
+        # VARA-protocol extras (absent on the AGWPE modem)
+        if hasattr(self.modem, "bitrate_report"):
+            self.modem.bitrate_report.connect(
+                lambda v: self.speed_label.setText(f"Speed: {v}"),
+                Qt.ConnectionType.QueuedConnection)
+            self.modem.session_bandwidth.connect(
+                lambda bw: self.bw_label.setText(f"BW: {bw} Hz"),
+                Qt.ConnectionType.QueuedConnection)
+            self.modem.version_report.connect(
+                self._on_version_report, Qt.ConnectionType.QueuedConnection)
         # HF PTT: modem emits ptt_event → PTT controller keys/unkeys radio
         self.modem.ptt_event.connect(self.ptt.on_ptt_event,
                                       Qt.ConnectionType.QueuedConnection)
@@ -406,8 +475,11 @@ class MainWindow(QMainWindow):
             self.target_input.setFocus()
             return
 
-        mode = self.config.get("vara_mode", "VARA FM")
-        is_agwpe = (mode == "AGWPE")
+        mode = self.config.mode
+        is_agwpe = (mode == MODE_AGWPE)
+
+        if self.config.is_aether and not self._aether_preflight():
+            return
 
         self.terminal.display.append_system(
             f"Connecting to {target} as {callsign} via {mode}...")
@@ -417,6 +489,8 @@ class MainWindow(QMainWindow):
         self._via1 = self.via1_input.text().upper().strip()
         self._via2 = self.via2_input.text().upper().strip()
         self._connect_in_progress = True
+        self._rf_session_up = False
+        self.speed_label.setText("Speed: —")
         self._cleanup_timer.stop()  # cancel any stale cleanup timer
 
         # Save target to recent stations history immediately
@@ -437,11 +511,12 @@ class MainWindow(QMainWindow):
             cmd_port = self.config.cmd_port
             data_port = self.config.data_port
             self.terminal.display.append_system(
-                f"VARA modem: {host}:{cmd_port}/{data_port}")
+                f"{mode} modem: {host}:{cmd_port}/{data_port}")
             self.modem.connect_to_modem(host, cmd_port, data_port)
 
-        # Start OmniRig PTT for HF mode (if configured)
-        if self.config.is_hf and self.config.get("hf_ptt_method") == "OmniRig":
+        # Start OmniRig PTT when this program keys the radio (VARA HF, or
+        # Aether HF set to "host program" keying)
+        if self.config.needs_host_ptt and self.config.get("hf_ptt_method") == "OmniRig":
             rig_num = self.config.get("omnirig_rig_number", 1)
             self.terminal.display.append_system(
                 f"Starting OmniRig PTT (Rig {rig_num})...")
@@ -459,9 +534,9 @@ class MainWindow(QMainWindow):
         self.modem_status_label.setStyleSheet(f"color: {C['success']};")
 
         callsign = self._effective_callsign()
-        is_hf = self.config.is_hf
-        bw = self.config.get("hf_bandwidth", 500)
-        self.modem.initialize_modem(callsign, is_hf, bw)
+        self.modem.initialize_modem(
+            callsign, self.config.is_hf_band, self.config.session_bandwidth,
+            query_version=self.config.is_aether)
 
         # RF CONNECT is sent when init completes (state → MODEM_CONNECTED).
         # A one-shot connection avoids the old fixed-timer race where
@@ -514,6 +589,7 @@ class MainWindow(QMainWindow):
         else:
             remote = getattr(self, '_target', 'UNKNOWN')
 
+        self._rf_session_up = True
         self.terminal.display.append_success(f"*** CONNECTED to {remote} ***")
         self.terminal.set_input_enabled(True)
         self.terminal.input.setFocus()
@@ -541,6 +617,9 @@ class MainWindow(QMainWindow):
     def _on_rf_disconnected(self):
         """RF session has ended."""
         self.terminal.display.append_warning("*** DISCONNECTED ***")
+        if self.config.is_aether and not self._rf_session_up:
+            self._explain_aether_no_session()
+        self._rf_session_up = False
         self.terminal.set_input_enabled(False)
         self._duration_timer.stop()
         self._close_session_log()
@@ -780,7 +859,7 @@ class MainWindow(QMainWindow):
         self.mode_combo.setEnabled(disconnected)
 
         # Sync combo selection with config (e.g. after Settings dialog)
-        expected_idx = 1 if self.config.is_hf else 0
+        expected_idx = _MODE_INDEX.get(self.config.mode, 0)
         if self.mode_combo.currentIndex() != expected_idx:
             self.mode_combo.blockSignals(True)
             try:
@@ -788,15 +867,18 @@ class MainWindow(QMainWindow):
             finally:
                 self.mode_combo.blockSignals(False)
 
-        # Update bandwidth label
-        if self.config.is_hf:
-            self.bw_label.setText(f"BW: {self.config.get('hf_bandwidth', 500)} Hz")
-        else:
-            self.bw_label.setText(f"BW: {self.config.get('fm_bandwidth', 'NARROW')}")
+        # Update bandwidth label (a CONNECTED line may refine it later)
+        if not connected:
+            if self.config.is_hf_band:
+                self.bw_label.setText(f"BW: {self.config.session_bandwidth} Hz")
+            elif self.config.mode == MODE_AGWPE:
+                self.bw_label.setText("BW: —")
+            else:
+                self.bw_label.setText(f"BW: {self.config.get('fm_bandwidth', 'NARROW')}")
 
     @pyqtSlot(str)
     def _on_command_event(self, event: str):
-        """Show relevant VARA events in terminal."""
+        """Show relevant modem events in terminal."""
         upper = event.upper()
         if upper.startswith("CONNECTED") or upper.startswith("DISCONNECTED"):
             pass  # handled by specific signals
@@ -812,6 +894,10 @@ class MainWindow(QMainWindow):
                 f"[MODEM] Command rejected: WRONG{cmd_hint}")
         elif upper == "CANCELPENDING":
             self.terminal.display.append_warning("[MODEM] Connection attempt cancelled")
+        elif upper == "MISSING SOUNDCARD":
+            self.terminal.display.append_error(
+                "[MODEM] The modem's sound card would not open — it can neither "
+                "hear nor transmit. Check the audio device in the modem's setup.")
         elif upper.startswith("PTT"):
             # PTT events are noisy during normal operation — only show
             # if the user has opted in via settings
@@ -832,11 +918,15 @@ class MainWindow(QMainWindow):
     def _on_error(self, msg: str):
         self.terminal.display.append_error(f"[ERROR] {msg}")
         # If this looks like a modem TCP connection failure, hint about mode
-        if "Cannot connect to VARA modem" in msg:
-            mode = self.config.get("vara_mode", "VARA FM")
+        if "Cannot connect to modem" in msg:
+            mode = self.config.mode
             self.terminal.display.append_warning(
-                f"  Tip: VARA Term is set to {mode}. Make sure the {mode}\n"
+                f"  Tip: {APP_NAME} is set to {mode}. Make sure the {mode}\n"
                 f"  modem is running. Switch modes in the toolbar if needed.")
+            if self.config.is_aether:
+                self.terminal.display.append_warning(
+                    "  Aether HF's host port is off by default: in Aether HF,\n"
+                    "  Setup step 5, turn on \"Host programs\" (port 8300).")
         self.modem_status_label.setText("Modem: Error")
         self.modem_status_label.setStyleSheet(f"color: {C['error']};")
         self._connect_in_progress = False
@@ -903,7 +993,7 @@ class MainWindow(QMainWindow):
         if call:
             self.setWindowTitle(f"{APP_NAME} — {call}")
         else:
-            self.setWindowTitle(f"{APP_NAME} — VARA BBS Terminal Client")
+            self.setWindowTitle(f"{APP_NAME} — {APP_TAGLINE}")
 
     def _refresh_profiles(self):
         self.profile_combo.clear()
@@ -926,10 +1016,13 @@ class MainWindow(QMainWindow):
                 parts.append(op)
             # Transport + bandwidth
             mode = p.get("mode", "VARA FM")
-            if mode == "VARA HF":
+            if mode == MODE_VARA_HF:
                 bw = p.get("bandwidth", 500)
                 parts.append(f"VARA HF/{bw}")
-            elif mode == "AGWPE":
+            elif mode == MODE_AETHER_HF:
+                bw = 500 if int(p.get("bandwidth", 2300)) == 500 else 2300
+                parts.append(f"Aether HF/{bw}")
+            elif mode == MODE_AGWPE:
                 parts.append("Soundmodem")
             else:
                 fm_bw = p.get("fm_bandwidth", "WIDE")
@@ -958,10 +1051,10 @@ class MainWindow(QMainWindow):
             mode = p.get("mode", "VARA FM")
             if mode != self.config.get("vara_mode"):
                 self.config.set("vara_mode", mode)
-            bw = p.get("bandwidth", 500)
-            self.config.set("hf_bandwidth", bw)
+            self._apply_profile_bandwidth(p)
             fm_bw = p.get("fm_bandwidth", "WIDE")
             self.config.set("fm_bandwidth", fm_bw)
+            self._sync_aether_monitor()
             self._update_ui_state()
 
     # ── Session logging ────────────────────────────────────────────
@@ -973,7 +1066,7 @@ class MainWindow(QMainWindow):
             filename = f"{timestamp}_{remote}.log"
             self._session_log_file = open(logs_dir / filename, "w", encoding="utf-8")
             self._session_log_file.write(
-                f"VARA Term Session Log\n"
+                f"{APP_NAME} Session Log\n"
                 f"Date: {datetime.now().isoformat()}\n"
                 f"Station: {self._effective_callsign()}\n"
                 f"Remote: {remote}\n"
@@ -1079,9 +1172,8 @@ class MainWindow(QMainWindow):
 
     def _on_mode_switched(self, index: int):
         """User changed transport mode via the toolbar combo."""
-        _idx_to_mode = {0: "VARA FM", 1: "VARA HF", 2: "AGWPE"}
-        new_mode = _idx_to_mode.get(index, "VARA FM")
-        old_mode = self.config.get("vara_mode", "VARA FM")
+        new_mode = _MODES[index][1] if 0 <= index < len(_MODES) else MODE_VARA_FM
+        old_mode = self.config.mode
         if new_mode == old_mode:
             return
 
@@ -1097,23 +1189,45 @@ class MainWindow(QMainWindow):
 
         # 3. Terminate old modem process and launch the new one
         self._terminate_modem_processes()
-        label = "Soundmodem (AGWPE)" if new_mode == "AGWPE" else new_mode
+        label = _MODE_LABEL.get(new_mode, new_mode)
         self.terminal.display.append_system(f"Switched to {label}")
         QTimer.singleShot(300, self._launch_modem_processes)
 
+        self._sync_aether_monitor()
         self._update_ui_state()
 
     def _launch_modem_processes(self):
         """Launch the modem executable matching the selected mode."""
-        mode = self.config.get("vara_mode", "VARA FM")
+        mode = self.config.mode
 
-        if mode == "AGWPE":
+        if mode == MODE_AETHER_HF:
+            if not self.config.get("aether_auto_launch", False):
+                return
+            configured = self.config.get("aether_exe_path", "")
+            exe = find_aether_exe(configured)
+            if self._aether_already_running():
+                self.terminal.display.append_system(
+                    "Aether HF is already running — not starting another")
+                return
+            proc = self._start_modem_exe(exe, "Aether HF")
+            if proc:
+                self.terminal.display.append_system("Launched Aether HF")
+                if exe != configured:
+                    self.config.set("aether_exe_path", exe)
+            else:
+                self.terminal.display.append_warning(
+                    "Aether HF not found.\n"
+                    "  Install it from " + AETHER_RELEASES_URL + "\n"
+                    "  or set its path in Settings > Modem Configuration.")
+            return
+
+        if mode == MODE_AGWPE:
             should_launch = self.config.get("soundmodem_auto_launch", False)
             configured_path = self.config.get("soundmodem_exe_path", "")
             search_paths = []  # no common default paths for soundmodem
             path_key = "soundmodem_exe_path"
             mode_label = "Soundmodem"
-        elif mode == "VARA HF":
+        elif mode == MODE_VARA_HF:
             should_launch = self.config.get("vara_hf_auto_launch", True)
             configured_path = self.config.get("vara_hf_exe_path", "")
             search_paths = self._VARA_HF_PATHS
@@ -1161,7 +1275,7 @@ class MainWindow(QMainWindow):
             return None
 
     def _terminate_modem_processes(self):
-        """Terminate all VARA modem processes we launched.
+        """Terminate all modem processes we launched.
 
         Uses ``taskkill /F /T`` on Windows to kill the entire process
         tree, since VARA FM/HF may spawn child processes that survive
@@ -1194,7 +1308,7 @@ class MainWindow(QMainWindow):
     # ── Dialogs ────────────────────────────────────────────────────
 
     def _open_settings(self, tab: int = 0):
-        old_mode = self.config.get("vara_mode", "VARA FM")
+        old_mode = self.config.mode
         dlg = SettingsDialog(self.config, self)
         if hasattr(dlg, 'tabs'):
             dlg.tabs.setCurrentIndex(tab)
@@ -1212,6 +1326,7 @@ class MainWindow(QMainWindow):
                 self.terminal.display.append_system(f"Switched to {new_mode}")
                 QTimer.singleShot(300, self._launch_modem_processes)
 
+            self._sync_aether_monitor(restart=True)
             self._update_ui_state()
 
     def _open_passwords(self):
@@ -1235,22 +1350,26 @@ class MainWindow(QMainWindow):
         self.via2_input.setText(profile.get("via2", ""))
         mode = profile.get("mode", "VARA FM")
         self.config.set("vara_mode", mode)
-        if mode == "VARA HF":
-            self.config.set("hf_bandwidth", profile.get("bandwidth", 500))
+        self._apply_profile_bandwidth(profile)
+        self._sync_aether_monitor()
         self._update_ui_state()
         QTimer.singleShot(200, self._on_connect)
 
     def _show_about(self):
         QMessageBox.about(self, f"About {APP_NAME}",
             f"<h2>{APP_NAME} v{APP_VERSION}</h2>"
-            f"<p>VARA BBS Terminal Client</p>"
+            f"<p>{APP_TAGLINE}</p>"
             f"<p>A modern terminal for connecting to amateur radio BBS systems "
-            f"over VARA FM and VARA HF modems.</p>"
+            f"over VARA FM, VARA HF, the open-source Aether HF modem, "
+            f"and AGWPE packet TNCs.</p>"
             f"<p><b>Features:</b><br>"
             f"• HMAC-SHA256 challenge-response authentication<br>"
             f"• Password never transmitted over RF<br>"
+            f"• Aether HF integration: live modem status, rules and fault checks<br>"
             f"• VARA FM and HF support with digipeater routing<br>"
             f"• Connection profiles and macro buttons</p>"
+            f"<p>Formerly <i>VARA Term</i>. "
+            f"<a href='https://github.com/KK4ODA/aether-term'>github.com/KK4ODA/aether-term</a></p>"
             f"<p>Built with Python and PyQt6.</p>"
         )
 
@@ -1304,6 +1423,140 @@ class MainWindow(QMainWindow):
             log.info("Sent HMAC auth response (after turnaround delay)")
         else:
             log.warning("Auth response not sent — no longer connected")
+
+    # ── Aether HF ──────────────────────────────────────────────────
+
+    def _apply_profile_bandwidth(self, profile: dict):
+        """Set the HF bandwidth a profile asks for, for its modem."""
+        mode = profile.get("mode", MODE_VARA_FM)
+        if mode == MODE_VARA_HF:
+            self.config.set("hf_bandwidth", profile.get("bandwidth", 500))
+        elif mode == MODE_AETHER_HF:
+            bw = 500 if int(profile.get("bandwidth", 2300)) == 500 else 2300
+            self.config.set("aether_bandwidth", bw)
+
+    def _sync_aether_monitor(self, restart: bool = False):
+        """Run the status monitor only while Aether HF is the selected modem."""
+        if self.config.is_aether:
+            if restart or not self.aether.running:
+                self.aether.start(self.config.aether_control_url)
+            self.aether_label.setText("Aether: checking...")
+            self.aether_label.show()
+        else:
+            self.aether.stop()
+            self._aether_status = None
+            self.aether_label.hide()
+
+    @pyqtSlot(object)
+    def _on_aether_status(self, st: AetherStatus):
+        if not self.config.is_aether:
+            return
+        self._aether_status = st
+        self.aether_label.setText(st.summary)
+        if not st.reachable:
+            color = C["text_dim"]
+        elif st.problems:
+            color = C["error"]
+        elif st.transmitting:
+            color = C["warning"]
+        else:
+            color = C["success"]
+        self.aether_label.setStyleSheet(f"color: {color}; font-weight: bold;")
+
+    def _aether_snapshot(self) -> AetherStatus:
+        return AetherControl(self.config.aether_control_url).snapshot()
+
+    def _aether_already_running(self) -> bool:
+        return self._aether_snapshot().reachable
+
+    def _aether_preflight(self) -> bool:
+        """Check Aether HF can take the call. Returns False to stop here.
+
+        The VARA command set cannot say *why* a modem refuses a call, so
+        the control API is asked first: a host port that is switched off,
+        no rules chosen, or a keying fault are reported in plain words
+        before anything is sent.
+        """
+        st = self._aether_snapshot()
+        if not st.reachable:
+            self.terminal.display.append_warning(
+                "[AETHER] Control API not reachable at "
+                f"{self.config.aether_control_url} — connecting over the "
+                "host port without status checks.")
+            return True
+        self.terminal.display.append_system(f"[AETHER] {st.summary}")
+        if st.state in ("connecting", "connected", "disconnecting"):
+            self.terminal.display.append_warning(
+                f"[AETHER] The modem is busy ({st.state}"
+                f"{' with ' + st.remote if st.remote else ''}) — "
+                "a session started from its own panel is not this program's to end.")
+        stop = False
+        for problem in st.problems:
+            self.terminal.display.append_error(f"[AETHER] {problem}")
+            stop = True
+        if stop:
+            self.terminal.display.append_warning(
+                "[AETHER] Not connecting. Fix the above in Aether HF and try again.")
+            self._connect_in_progress = False
+        return not stop
+
+    def _explain_aether_no_session(self):
+        """The call ended without a session — say why, if the modem knows."""
+        st = self._aether_snapshot()
+        problems = st.problems if st.reachable else []
+        if problems:
+            for p in problems:
+                self.terminal.display.append_error(f"[AETHER] {p}")
+            return
+        target = getattr(self, "_target", "the target")
+        self.terminal.display.append_warning(
+            f"[AETHER] No session with {target}. Aether HF talks only to other\n"
+            "  Aether HF stations, on the same bandwidth and link protocol\n"
+            "  version. Its log (Log tab) has the reason for every refused call.")
+
+    @pyqtSlot(str)
+    def _on_version_report(self, version: str):
+        self.modem_status_label.setText(f"Modem: {version}")
+        if self.config.is_aether and "aether" not in version.lower():
+            self.terminal.display.append_warning(
+                f"[AETHER] The modem on this port reports \"{version}\", not "
+                "Aether HF. Close it, or point Aether Term at Aether HF's port.")
+        elif self.config.is_aether:
+            self.terminal.display.append_success(f"[AETHER] Modem: {version}")
+
+    def _show_aether_status(self):
+        st = self._aether_snapshot()
+        url = self.config.aether_control_url
+        if not st.reachable:
+            QMessageBox.information(
+                self, "Aether HF",
+                f"<p>Aether HF is not reachable at <code>{url}</code>.</p>"
+                f"<p>Start Aether HF, or download it from "
+                f"<a href='{AETHER_RELEASES_URL}'>{AETHER_RELEASES_URL}</a>.</p>")
+            return
+        rows = [
+            ("Version", st.version),
+            ("State", st.state + (f" with {st.remote}" if st.remote else "")),
+            ("Callsign", st.callsign or "(none)"),
+            ("Bandwidth", f"{st.bandwidth_hz} Hz" if st.bandwidth_hz else "?"),
+            ("Rung", st.rung_name or (str(st.mode) if st.mode is not None else "—")),
+            ("Host port", ("on" if st.host_enabled else "OFF")
+             + (", in use" if st.host_connected else "")),
+            ("Keying", st.ptt or "?"),
+            ("Rules", f"{st.regulatory_policy or '?'} — "
+                      f"{st.regulatory_summary or st.regulatory_verdict or ''}"),
+            ("Channel", "busy" if st.channel_busy else "clear"),
+        ]
+        html = "<table>" + "".join(
+            f"<tr><td><b>{k}</b>&nbsp;&nbsp;</td><td>{v}</td></tr>" for k, v in rows
+        ) + "</table>"
+        if st.problems:
+            html += "<p><b>Needs attention:</b><br>" + "<br>".join(
+                f"• {p}" for p in st.problems) + "</p>"
+        QMessageBox.information(self, "Aether HF Status", html)
+
+    def _open_aether_panel(self):
+        QDesktopServices.openUrl(QUrl(self.config.aether_control_url + "/"))
 
     # ── Transport switching ─────────────────────────────────────────
 
@@ -1447,7 +1700,7 @@ class MainWindow(QMainWindow):
     def _show_welcome(self):
         self.terminal.display.append_text(
             "\n"
-            "  VARA Term  --  VARA BBS Terminal Client\n"
+            f"  {APP_NAME}  --  {APP_TAGLINE}\n"
             f"  Version {APP_VERSION}\n"
             "  -----------------------------------\n"
             "\n",
@@ -1502,6 +1755,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         """Clean up on window close."""
         self._cleanup_timer.stop()
+        self.aether.stop()
         if self.ptt.is_enabled:
             self.ptt.stop()
         if self.modem.state != ConnectionState.DISCONNECTED:

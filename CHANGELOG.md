@@ -1,7 +1,62 @@
-# VARA Term Changelog
+# Aether Term Changelog
 
-All notable changes to VARA Term are documented here.
+All notable changes to Aether Term (formerly VARA Term) are documented here.
 Format: [version] — YYYY-MM-DD, then a bulleted list of changes.
+
+---
+
+## [1.1.0] — 2026-10-10
+
+### Changed
+
+- **Renamed VARA Term → Aether Term.** The repository is now
+  `KK4ODA/aether-term`. The window, installer, executable (`Aether Term.exe`),
+  launcher (`start_aether_term.bat`), PyInstaller spec (`aether_term.spec`),
+  log file (`~/Aether Term/logs/aether-term.log`) and docs carry the new name.
+- **Settings migrate automatically.** On first start, `%APPDATA%\VARA Term\`
+  (settings, encrypted station passwords, Hamlib download) is copied to
+  `%APPDATA%\Aether Term\`. The old folder is left untouched. The password
+  store keeps its original key-derivation identifiers so saved passwords stay
+  readable. *(config.py, passwords.py)*
+- The installer keeps VARA Term's AppId, so it upgrades an existing install.
+
+### Added
+
+- **Aether HF modem support** (https://github.com/KK4ODA/aether-hf), as a
+  fourth transport next to VARA FM, VARA HF and Soundmodem — in the toolbar,
+  Settings and connection profiles. Sessions run over Aether HF's
+  VARA-compatible host port (8300/8301), with `BW2300`/`BW500`.
+  *(config.py, gui/main_window.py, gui/settings_dialog.py, gui/profile_dialog.py)*
+- **Aether HF control-API client** (`aether/control.py`): read-only `status`
+  and `capabilities` over `http://127.0.0.1:8515/v1/`. Used for:
+  - a live status-bar indicator (version, bandwidth, state, rung, faults),
+    polled every 2 s while Aether HF is selected;
+  - a **pre-connect check** that stops the call with a plain explanation when
+    the host port is off, no rules are chosen, the rules block TX, or keying or
+    the sound card has a fault;
+  - explaining a call that ended without a session;
+  - **Settings → Modem Configuration → Test Aether HF**, and an
+    **Aether HF** menu (status, station panel, setup guide, download).
+- `VERSION` check after attaching in Aether HF mode, which warns if another
+  modem (such as VARA HF) holds the port.
+- `BITRATE` link speed and the bandwidth from `CONNECTED` in the status bar
+  (any VARA-protocol modem that sends them). `MISSING SOUNDCARD` is reported.
+- Optional Aether HF auto-launch (`%LOCALAPPDATA%\Aether HF\aether-hf.exe`),
+  skipped when Aether HF is already running.
+- Aether HF keying option: PTT from Aether Term only when Aether HF's keying
+  is set to "host program". By default Aether HF keys the radio itself, and
+  its regulatory check stays on.
+- `docs/AETHER_HF.md` documents the protocol mapping.
+
+### Fixed
+
+- The toolbar mode selector snapped back to VARA FM after closing Settings
+  while Soundmodem was selected.
+- Connection profiles could not store the Soundmodem (AGWPE) mode.
+- The `OK` that Aether HF sends for the cleanup `DISCONNECT` is now absorbed
+  during modem init, so init no longer waits for a 2 s timeout.
+- `build.bat` referenced a spec file that did not exist, and the release
+  workflow passed an unquoted name with a space to PyInstaller.
 
 ---
 

@@ -1,5 +1,5 @@
 """
-vara/omnirig.py — Thread-safe OmniRig client for VARA Term (HF PTT control).
+vara/omnirig.py — Thread-safe OmniRig client for Aether Term (HF PTT control).
 
 All COM calls run on a single dedicated thread to avoid cross-apartment
 proxy issues.  This is used only for VARA HF, where the modem sends

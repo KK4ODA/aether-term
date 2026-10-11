@@ -1,9 +1,9 @@
 @echo off
 chcp 65001 >nul
-title VARA Term - VARA BBS Terminal Client
+title Aether Term - BBS Terminal Client for VARA and Aether HF
 
-:: -- VARA Term Launcher --------------------------------------------------------------
-:: This script sets up the Python environment and launches VARA Term.
+:: -- Aether Term Launcher --------------------------------------------------------------
+:: This script sets up the Python environment and launches Aether Term.
 :: Place this file in the same folder as main.py.
 :: --------------------------------------------------------------------------------
 
@@ -13,14 +13,13 @@ setlocal EnableDelayedExpansion
 cd /d "%~dp0"
 
 echo.
-echo  ##  ## ######
-echo  ##  ##   ##    ####  #####  ##   ##
-echo  ##  ##   ##   ##  ## ##  ## ### ###
-echo  ##  ##   ##   ###### #####  ## # ##
-echo   ####    ##   ##     ## ##  ##   ##
-echo    ##     ##    ####  ##  ## ##   ##
+echo     _          _   _                 _____
+echo    / \   ___^| ^|_^| ^|__   ___ _ __  ^|_   _^|__ _ __ _ __ ___
+echo   / _ \ / _ \ __^| '_ \ / _ \ '__^|   ^| ^|/ _ \ '__^| '_ ` _ \
+echo  / ___ \  __/ ^|_^| ^| ^| ^|  __/ ^|      ^| ^|  __/ ^|  ^| ^| ^| ^| ^| ^|
+echo /_/   \_\___^|\__^|_^| ^|_^|\___^|_^|      ^|_^|\___^|_^|  ^|_^| ^|_^| ^|_^|
 echo.
-echo                VARA Term - VARA BBS Terminal Client  v1.0
+echo          Aether Term - BBS Terminal Client for VARA and Aether HF
 echo  --------------------------------------------------------------------------
 echo.
 
@@ -85,7 +84,7 @@ if errorlevel 1 goto manualinstall
 
 echo.
 echo  Python installed successfully.
-echo  Please CLOSE this window and run start_vara_term.bat again
+echo  Please CLOSE this window and run start_aether_term.bat again
 echo  so the new PATH takes effect.
 echo.
 pause
@@ -230,7 +229,7 @@ if !MISSING!==1 (
 
 echo.
 echo  --------------------------------------------------------------------------
-echo  Starting VARA Term...
+echo  Starting Aether Term...
 echo  --------------------------------------------------------------------------
 echo.
 
@@ -241,9 +240,9 @@ echo.
 if errorlevel 1 (
     echo.
     echo  --------------------------------------------------------------------------
-    echo  [ERROR] VARA Term exited with an error ^(code %errorlevel%^).
+    echo  [ERROR] Aether Term exited with an error ^(code %errorlevel%^).
     echo  Check the logs folder for details:
-    echo    %USERPROFILE%\VTerm\logs\vterm.log
+    echo    %USERPROFILE%\Aether Term\logs\aether-term.log
     echo  --------------------------------------------------------------------------
     echo.
     pause

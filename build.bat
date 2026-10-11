@@ -1,13 +1,13 @@
 @echo off
 REM ═══════════════════════════════════════════════════════════════
-REM  build.bat — One-click build for VARA Term Windows installer
+REM  build.bat — One-click build for Aether Term Windows installer
 REM ═══════════════════════════════════════════════════════════════
 REM
 REM  This script will:
 REM    1. Find Python 3.10–3.13 via the py launcher
 REM    2. Install all pip dependencies automatically
-REM    3. Build VARA Term exe via PyInstaller
-REM    4. Create VARA_Term_Setup_x.y.z.exe via Inno Setup (if installed)
+REM    3. Build Aether Term exe via PyInstaller
+REM    4. Create Aether_Term_Setup_x.y.z.exe via Inno Setup (if installed)
 REM    5. Create a portable .zip (run without installing)
 REM    6. Zip the installer (avoids antivirus flags on bare .exe)
 REM
@@ -18,12 +18,12 @@ REM ═════════════════════════�
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
-set "APP_NAME=VARA Term"
+set "APP_NAME=Aether Term"
 set /p APP_VERSION=<version.txt
 
 echo.
 echo  ========================================================
-echo    VARA Term v%APP_VERSION% — Windows Build
+echo    Aether Term v%APP_VERSION% — Windows Build
 echo  ========================================================
 echo.
 
@@ -108,7 +108,7 @@ echo [4/5] Building %APP_NAME%.exe with PyInstaller...
 echo        (this takes 1-3 minutes depending on your machine)
 echo.
 
-!PY! -m PyInstaller --noconfirm --clean vara_term.spec
+!PY! -m PyInstaller --noconfirm --clean aether_term.spec
 
 if errorlevel 1 (
     echo.
@@ -172,12 +172,12 @@ if defined ISCC (
 REM Always create a portable .zip
 echo.
 echo        Creating portable .zip...
-!PY! -c "import shutil; shutil.make_archive('dist/VARA_Term_Portable_1.0.1', 'zip', 'dist', 'VTerm')"
+!PY! -c "import shutil; shutil.make_archive('dist/Aether_Term_Portable_%APP_VERSION%', 'zip', 'dist', 'Aether Term')"
 
 REM Zip the installer (bare .exe files get flagged by antivirus / email / browsers)
-if exist "dist\VARA_Term_Setup_%APP_VERSION%.exe" (
+if exist "dist\Aether_Term_Setup_%APP_VERSION%.exe" (
     echo        Creating installer .zip...
-    !PY! -c "import zipfile, os; z=zipfile.ZipFile('dist/VARA_Term_Setup_%APP_VERSION%.zip','w',zipfile.ZIP_DEFLATED); z.write('dist/VARA_Term_Setup_%APP_VERSION%.exe','VARA_Term_Setup_%APP_VERSION%.exe'); z.close()"
+    !PY! -c "import zipfile, os; z=zipfile.ZipFile('dist/Aether_Term_Setup_%APP_VERSION%.zip','w',zipfile.ZIP_DEFLATED); z.write('dist/Aether_Term_Setup_%APP_VERSION%.exe','Aether_Term_Setup_%APP_VERSION%.exe'); z.close()"
 )
 
 REM ══════════════════════════════════════════════════════════════
@@ -189,18 +189,18 @@ echo    BUILD SUCCESSFUL
 echo  ========================================================
 echo.
 
-if exist "dist\VARA_Term_Setup_%APP_VERSION%.exe" (
-    echo    Installer:       dist\VARA_Term_Setup_%APP_VERSION%.exe
+if exist "dist\Aether_Term_Setup_%APP_VERSION%.exe" (
+    echo    Installer:       dist\Aether_Term_Setup_%APP_VERSION%.exe
 )
-if exist "dist\VARA_Term_Setup_%APP_VERSION%.zip" (
-    echo    Installer ZIP:   dist\VARA_Term_Setup_%APP_VERSION%.zip   ^(share this^)
+if exist "dist\Aether_Term_Setup_%APP_VERSION%.zip" (
+    echo    Installer ZIP:   dist\Aether_Term_Setup_%APP_VERSION%.zip   ^(share this^)
 )
-if exist "dist\VARA_Term_Portable_%APP_VERSION%.zip" (
-    echo    Portable ZIP:    dist\VARA_Term_Portable_%APP_VERSION%.zip
+if exist "dist\Aether_Term_Portable_%APP_VERSION%.zip" (
+    echo    Portable ZIP:    dist\Aether_Term_Portable_%APP_VERSION%.zip
 )
-echo    Standalone:      dist\VARA Term\VARA Term.exe
+echo    Standalone:      dist\Aether Term\Aether Term.exe
 echo.
-echo  Test it:  dist\VARA Term\VARA Term.exe
+echo  Test it:  dist\Aether Term\Aether Term.exe
 echo.
 pause
 exit /b 0

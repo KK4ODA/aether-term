@@ -1,1 +1,1 @@
-# gui/ — VARA Term graphical interface
+# gui/ — Aether Term graphical interface

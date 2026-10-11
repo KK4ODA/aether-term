@@ -1,18 +1,30 @@
 """
-config.py — Configuration management for VARA Term.
+config.py — Configuration management for Aether Term.
 
 Loads/saves settings from a JSON file in the user's app data directory.
 """
 
 import json
 import os
+import shutil
 import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 log = logging.getLogger(__name__)
 
-APP_NAME = "VARA Term"
+APP_NAME = "Aether Term"
+
+# The name this application shipped under before the rebrand. Settings,
+# passwords and downloaded Hamlib binaries are carried over from its data
+# directory the first time Aether Term starts.
+LEGACY_APP_NAME = "VARA Term"
+
+# Transport modes (the ``vara_mode`` setting)
+MODE_VARA_FM = "VARA FM"
+MODE_VARA_HF = "VARA HF"
+MODE_AETHER_HF = "Aether HF"
+MODE_AGWPE = "AGWPE"
 
 
 def _read_version() -> str:
@@ -34,13 +46,28 @@ def _read_version() -> str:
 
 APP_VERSION = _read_version()
 
-def _app_data_dir() -> Path:
-    """Return the platform-appropriate app data directory."""
+def _app_data_base() -> Path:
     if os.name == "nt":
-        base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
-    else:
-        base = Path.home() / ".config"
+        return Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
+    return Path.home() / ".config"
+
+
+def _app_data_dir() -> Path:
+    """Return the platform-appropriate app data directory.
+
+    On first run after the rebrand, the old VARA Term data directory
+    (settings, encrypted passwords, Hamlib download) is copied across so
+    nothing has to be configured again.  The old directory is left alone.
+    """
+    base = _app_data_base()
     d = base / APP_NAME
+    legacy = base / LEGACY_APP_NAME
+    if not d.exists() and legacy.is_dir():
+        try:
+            shutil.copytree(legacy, d)
+            log.info(f"Migrated settings from {legacy} to {d}")
+        except Exception as e:
+            log.warning(f"Could not migrate settings from {legacy}: {e}")
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -66,8 +93,8 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "my_callsign": "",
     "my_ssid": 0,
 
-    # VARA mode
-    "vara_mode": "VARA FM",  # or "VARA HF"
+    # Transport mode: "VARA FM", "VARA HF", "Aether HF" or "AGWPE"
+    "vara_mode": "VARA FM",
 
     # VARA FM modem
     "vara_fm_host": "127.0.0.1",
@@ -82,6 +109,17 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "vara_hf_data_port": 8301,
     "vara_hf_auto_launch": True,
     "vara_hf_exe_path": r"C:\VARA HF\VARA HF.exe",
+
+    # Aether HF modem (https://github.com/KK4ODA/aether-hf) — its
+    # VARA-compatible host port, plus its own control API for status
+    "aether_host": "127.0.0.1",
+    "aether_cmd_port": 8300,
+    "aether_data_port": 8301,
+    "aether_control_port": 8515,
+    "aether_auto_launch": False,
+    "aether_exe_path": "",          # empty = look in the default install folder
+    "aether_bandwidth": 2300,       # 500 / 2300 — both stations must match
+    "aether_host_ptt": False,       # True when Aether's keying is "host program"
 
     # RF settings
     "hf_bandwidth": 500,  # 500 / 2300 / 2750
@@ -243,26 +281,63 @@ class Config:
         return call
 
     @property
+    def mode(self) -> str:
+        return self._data.get("vara_mode", MODE_VARA_FM)
+
+    @property
     def is_hf(self) -> bool:
-        return self._data.get("vara_mode", "VARA FM") == "VARA HF"
+        """True for VARA HF only (Aether HF is reported by ``is_aether``)."""
+        return self.mode == MODE_VARA_HF
+
+    @property
+    def is_aether(self) -> bool:
+        return self.mode == MODE_AETHER_HF
+
+    @property
+    def is_hf_band(self) -> bool:
+        """True for either HF modem — VARA HF or Aether HF."""
+        return self.is_hf or self.is_aether
+
+    @property
+    def session_bandwidth(self) -> int:
+        """The HF bandwidth to request from the modem (BW500/BW2300/...)."""
+        if self.is_aether:
+            return int(self._data.get("aether_bandwidth", 2300))
+        return int(self._data.get("hf_bandwidth", 500))
+
+    @property
+    def needs_host_ptt(self) -> bool:
+        """Whether Aether Term must key the radio on the modem's PTT ON.
+
+        VARA HF always leaves keying to the host. Aether HF keys the radio
+        itself unless its keying is set to "host program".
+        """
+        if self.is_aether:
+            return bool(self._data.get("aether_host_ptt", False))
+        return self.is_hf
+
+    def _prefix(self) -> str:
+        if self.is_aether:
+            return "aether"
+        return "vara_hf" if self.is_hf else "vara_fm"
 
     @property
     def modem_host(self) -> str:
-        if self.is_hf:
-            return self._data.get("vara_hf_host", "127.0.0.1")
-        return self._data.get("vara_fm_host", "127.0.0.1")
+        return self._data.get(f"{self._prefix()}_host", "127.0.0.1")
 
     @property
     def cmd_port(self) -> int:
-        if self.is_hf:
-            return int(self._data.get("vara_hf_cmd_port", 8300))
-        return int(self._data.get("vara_fm_cmd_port", 8300))
+        return int(self._data.get(f"{self._prefix()}_cmd_port", 8300))
 
     @property
     def data_port(self) -> int:
-        if self.is_hf:
-            return int(self._data.get("vara_hf_data_port", 8301))
-        return int(self._data.get("vara_fm_data_port", 8301))
+        return int(self._data.get(f"{self._prefix()}_data_port", 8301))
+
+    @property
+    def aether_control_url(self) -> str:
+        host = self._data.get("aether_host", "127.0.0.1")
+        port = int(self._data.get("aether_control_port", 8515))
+        return f"http://{host}:{port}"
 
     @property
     def logs_dir(self) -> Path:

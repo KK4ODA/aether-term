@@ -1,5 +1,5 @@
 """
-updater.py — Git-based auto-updater for VARA Term.
+updater.py — Git-based auto-updater for Aether Term.
 
 Fetches from origin, compares HEAD with the remote tracking branch,
 and (optionally) pulls + signals for a restart.

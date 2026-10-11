@@ -1,5 +1,5 @@
 """
-gui/hamlib_settings.py — Hamlib CAT/PTT settings panel for the VARA Term settings dialog.
+gui/hamlib_settings.py — Hamlib CAT/PTT settings panel for the Aether Term settings dialog.
 
 This module provides HamlibSettingsGroup (a QGroupBox) that can be dropped
 into the existing Modem Configuration tab, plus a HamlibDownloadDialog for
@@ -97,13 +97,13 @@ class HamlibSettingsGroup(QGroupBox):
 
         # Auto-launch rigctld
         self.auto_launch_cb = QCheckBox(
-            "Auto-launch rigctld with VARA Term")
+            "Auto-launch rigctld with Aether Term")
         form.addRow(self.auto_launch_cb)
 
         # rigctld executable path
         self.rigctld_path = QLineEdit()
         self.rigctld_path.setPlaceholderText(
-            r"%APPDATA%\VARA Term\hamlib\bin\rigctld.exe")
+            r"%APPDATA%\Aether Term\hamlib\bin\rigctld.exe")
         browse_btn = QPushButton("Browse...")
         browse_btn.clicked.connect(self._browse_rigctld)
         path_row = QHBoxLayout()

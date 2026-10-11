@@ -1,13 +1,13 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-vara_term.spec — PyInstaller spec file for VARA Term.
+aether_term.spec — PyInstaller spec file for Aether Term.
 
 Build with:
-    pyinstaller vara_term.spec
+    pyinstaller aether_term.spec
 
-Produces: dist/VARA Term/VARA Term.exe  (one-directory mode)
+Produces: dist/Aether Term/Aether Term.exe  (one-directory mode)
     — or —
-    pyinstaller vara_term.spec --onefile    (single .exe, slower startup)
+    pyinstaller aether_term.spec --onefile    (single .exe, slower startup)
 
 One-directory mode is recommended because:
   - Faster startup (no temp extraction)
@@ -57,6 +57,10 @@ hiddenimports = [
     'vara.hamlib',
     'vara.hamlib_download',
     'vara.flrig',
+    'vara.agwpe',
+    'vara.agwpe_modem',
+    'aether',
+    'aether.control',
 
     # PyQt6 plugins
     'PyQt6.sip',
@@ -168,7 +172,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='VARA Term',
+    name='Aether Term',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -190,5 +194,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='VARA Term',
+    name='Aether Term',
 )

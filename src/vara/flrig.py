@@ -1,5 +1,5 @@
 """
-vara/flrig.py — Thread-safe FLrig XML-RPC client for VARA Term.
+vara/flrig.py — Thread-safe FLrig XML-RPC client for Aether Term.
 
 Communicates with the FLrig application via its XML-RPC server
 (default port 12345) for CAT and PTT control.  FLrig supports
@@ -10,7 +10,7 @@ Architecture mirrors HamlibClient: all XML-RPC I/O happens on a
 single dedicated thread; public methods are thread-safe, queueing
 commands and blocking until the I/O thread completes them.
 
-FLrig must be running independently before VARA Term connects.
+FLrig must be running independently before Aether Term connects.
 
 Usage:
     client = FLrigClient(host="127.0.0.1", port=12345)

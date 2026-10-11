@@ -29,6 +29,6 @@ ENV/
 Thumbs.db
 desktop.ini
 
-# VTerm runtime
+# Aether Term runtime
 *.log
 start_term.bat

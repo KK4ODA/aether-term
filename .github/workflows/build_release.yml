@@ -1,4 +1,4 @@
-name: Build VARA Term Release
+name: Build Aether Term Release
 
 on:
   release:
@@ -24,9 +24,10 @@ jobs:
 
       - name: Build executable
         run: |
-          pyinstaller --onefile --name VARA Term --paths src src/main.py
+          pyinstaller --noconfirm aether_term.spec
+          Compress-Archive -Path "dist/Aether Term" -DestinationPath "dist/Aether_Term_Portable.zip"
 
       - name: Upload executable to release
         uses: softprops/action-gh-release@v1
         with:
-          files: dist/VARA Term.exe
+          files: dist/Aether_Term_Portable.zip

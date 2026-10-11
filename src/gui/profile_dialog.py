@@ -1,5 +1,5 @@
 """
-gui/profile_dialog.py — Connection profile manager for VARA Term.
+gui/profile_dialog.py — Connection profile manager for Aether Term.
 """
 
 import logging
@@ -89,7 +89,10 @@ class ProfileDialog(QDialog):
         self.target_input.setPlaceholderText("e.g. KK4ODA-5")
         form.addRow("Target Callsign:", self.target_input)
         self.mode_combo = QComboBox()
-        self.mode_combo.addItems(["VARA FM", "VARA HF"])
+        for label, value in (("VARA FM", "VARA FM"), ("VARA HF", "VARA HF"),
+                             ("Aether HF", "Aether HF"),
+                             ("Soundmodem (AGWPE)", "AGWPE")):
+            self.mode_combo.addItem(label, value)
         form.addRow("Mode:", self.mode_combo)
         self.fm_bw_combo = QComboBox()
         self.fm_bw_combo.addItems(["WIDE", "NARROW"])
@@ -97,7 +100,10 @@ class ProfileDialog(QDialog):
         form.addRow("FM Bandwidth:", self.fm_bw_combo)
         self.bw_combo = QComboBox()
         self.bw_combo.addItems(["500", "2300", "2750"])
-        self.bw_combo.setToolTip("VARA HF bandwidth for this profile.\n500/2300/2750 Hz.")
+        self.bw_combo.setToolTip(
+            "HF bandwidth for this profile.\n"
+            "VARA HF: 500/2300/2750 Hz.\n"
+            "Aether HF: 500 or 2300 Hz (2750 runs as 2300).")
         form.addRow("HF Bandwidth:", self.bw_combo)
         self.via1_input = QLineEdit()
         self.via1_input.setPlaceholderText("Digipeater 1 (optional)")
@@ -136,7 +142,8 @@ class ProfileDialog(QDialog):
             self.my_ssid_spin.setValue(p.get("my_ssid", 0))
             self.tactical_input.setText(p.get("tactical_callsign", ""))
             self.target_input.setText(p.get("target_callsign", ""))
-            self.mode_combo.setCurrentText(p.get("mode", "VARA FM"))
+            idx = self.mode_combo.findData(p.get("mode", "VARA FM"))
+            self.mode_combo.setCurrentIndex(max(idx, 0))
             self.fm_bw_combo.setCurrentText(p.get("fm_bandwidth", "WIDE"))
             self.bw_combo.setCurrentText(str(p.get("bandwidth", 500)))
             self.via1_input.setText(p.get("via1", ""))
@@ -192,7 +199,7 @@ class ProfileDialog(QDialog):
             "my_ssid": self.my_ssid_spin.value(),
             "tactical_callsign": self.tactical_input.text().upper().strip(),
             "target_callsign": self.target_input.text().upper().strip(),
-            "mode": self.mode_combo.currentText(),
+            "mode": self.mode_combo.currentData(),
             "fm_bandwidth": self.fm_bw_combo.currentText(),
             "bandwidth": int(self.bw_combo.currentText()),
             "via1": self.via1_input.text().upper().strip(),

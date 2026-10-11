@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 >nul
-title VARA TERM Setup
+title AETHER TERM Setup
 setlocal EnableDelayedExpansion
 
 echo.
@@ -10,10 +10,10 @@ echo  ##  ## ###### #####   ######      ##   ####  #####   ##   ##
 echo   ####  ##  ## ## ##   ##  ##      ##   ##    ## ##
 echo    ##   ##  ## ##  ##  ##  ##      ##   ##### ##  ##
 echo.
-echo                    VARA Term  -  Remote Setup
+echo                    Aether Term  -  Remote Setup
 echo  -------------------------------------------------------------------------------------
 echo.
-echo  This script installs VARA Term on this computer.
+echo  This script installs Aether Term on this computer.
 echo  It will check for Git and Python, install them if needed,
 echo  clone the repository, install dependencies, and create a
 echo  desktop shortcut.
@@ -168,11 +168,11 @@ if !PY_MAJOR! EQU 3 if !PY_MINOR! LSS 10 (
 :: Step 3: Clone or update the repository
 :: ═══════════════════════════════════════════════════════════════════
 echo.
-echo  [3/5] Setting up VARA Term...
+echo  [3/5] Setting up Aether Term...
 echo.
 
-set "DEFAULT_DIR=%USERPROFILE%\vara-term"
-echo  Where would you like to install VARA TERM?
+set "DEFAULT_DIR=%USERPROFILE%\aether-term"
+echo  Where would you like to install AETHER TERM?
 echo  Press Enter for default: %DEFAULT_DIR%
 echo.
 set /p "INSTALL_DIR=  Install folder: "
@@ -197,8 +197,8 @@ if exist "!INSTALL_DIR!\.git" (
         pause
         exit /b 1
     )
-    echo  Cloning VARA Term repository...
-    git clone https://github.com/KK4ODA/vara-term.git "!INSTALL_DIR!"
+    echo  Cloning Aether Term repository...
+    git clone https://github.com/KK4ODA/aether-term.git "!INSTALL_DIR!"
     if errorlevel 1 (
         echo.
         echo  [ERROR] git clone failed. Check your internet connection.
@@ -263,7 +263,7 @@ echo  [5/5] Creating launcher and shortcut...
 > "!INSTALL_DIR!\start_term.bat" (
     echo @echo off
     echo chcp 65001 ^>nul
-    echo title VARA TERM
+    echo title AETHER TERM
     echo cd /d "%%~dp0"
     echo !PY! src\main.py
     echo pause
@@ -273,12 +273,12 @@ echo  Created start_term.bat
 
 :: Create desktop shortcut
 set "DESKTOP=%USERPROFILE%\Desktop"
-set "SHORTCUT=%DESKTOP%\VARA TERM.lnk"
+set "SHORTCUT=%DESKTOP%\AETHER TERM.lnk"
 
-powershell -NoProfile -Command "$ws = New-Object -ComObject WScript.Shell; $sc = $ws.CreateShortcut('%SHORTCUT%'); $sc.TargetPath = '!INSTALL_DIR!\start_term.bat'; $sc.WorkingDirectory = '!INSTALL_DIR!'; $sc.Description = 'VARA Term - VARA BBS Terminal Client'; $sc.Save()"
+powershell -NoProfile -Command "$ws = New-Object -ComObject WScript.Shell; $sc = $ws.CreateShortcut('%SHORTCUT%'); $sc.TargetPath = '!INSTALL_DIR!\start_term.bat'; $sc.WorkingDirectory = '!INSTALL_DIR!'; $sc.Description = 'Aether Term - BBS Terminal Client for VARA and Aether HF'; $sc.Save()"
 
 if exist "%SHORTCUT%" (
-    echo  Desktop shortcut created: VARA TERM
+    echo  Desktop shortcut created: AETHER TERM
 ) else (
     echo  [WARNING] Could not create desktop shortcut.
     echo  You can run start_term.bat from: !INSTALL_DIR!
@@ -292,8 +292,8 @@ echo  =====================================================================
 echo.
 echo   Setup complete!
 echo.
-echo   To launch VARA TERM:
-echo     - Double-click "VARA TERM" on your desktop
+echo   To launch AETHER TERM:
+echo     - Double-click "AETHER TERM" on your desktop
 echo     - Or run: !INSTALL_DIR!\start_term.bat
 echo.
 echo   Updates are checked automatically on startup.

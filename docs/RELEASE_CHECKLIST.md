@@ -1,6 +1,6 @@
 # RELEASE CHECKLIST
 
-Use this checklist whenever publishing a new version of VARA Term.
+Use this checklist whenever publishing a new version of Aether Term.
 
 ------------------------------------------------------------------------
 
@@ -9,13 +9,15 @@ Use this checklist whenever publishing a new version of VARA Term.
 ☐ Ensure all intended improvements and bug fixes are complete\
 ☐ Test the application locally\
 ☐ Verify the GUI works at normal window sizes\
-☐ Confirm no obvious regressions
+☐ Confirm no obvious regressions\
+☐ Connect once in each mode you can test — including Aether HF against a
+current Aether HF build, if its host interface or control API changed
 
 ------------------------------------------------------------------------
 
 ## 2. Update Version Number
 
-☐ Update `version.txt`\
+☐ Update `version.txt` and `MyAppVersion` in `installer.iss`\
 ☐ Follow Semantic Versioning:
 
 MAJOR.MINOR.PATCH
@@ -65,7 +67,7 @@ On GitHub:
 Fill in:
 
 Tag version: `vX.Y.Z`\
-Release title: `VARA Term X.Y.Z`
+Release title: `Aether Term X.Y.Z`
 
 ------------------------------------------------------------------------
 
@@ -73,7 +75,9 @@ Release title: `VARA Term X.Y.Z`
 
 Attach:
 
-☐ Windows executable (`vterm.exe`)\
+☐ Installer (`Aether_Term_Setup_X.Y.Z.exe`) and portable zip
+(`Aether_Term_Portable_X.Y.Z.zip`) from `build.bat` — the release workflow
+also attaches a portable zip automatically\
 ☐ Source code archive (optional)
 
 ------------------------------------------------------------------------

@@ -1,16 +1,16 @@
 """
-vara/hamlib_download.py — Auto-download and update Hamlib binaries for VARA Term.
+vara/hamlib_download.py — Auto-download and update Hamlib binaries for Aether Term.
 
 Downloads the latest Hamlib release from the official GitHub repository
 (https://github.com/Hamlib/Hamlib/releases) and extracts it to the
-VARA Term application data directory.
+Aether Term application data directory.
 
 The module uses GitHub's releases API to find the latest version,
 compares it to the locally installed version, and downloads the
 appropriate platform binary if an update is available.
 
 Usage (from a background thread or async context):
-    downloader = HamlibDownloader(install_dir=Path("C:/Users/.../VARA Term/hamlib"))
+    downloader = HamlibDownloader(install_dir=Path("C:/Users/.../Aether Term/hamlib"))
     info = downloader.check_update()
     if info["update_available"]:
         downloader.download_and_install(progress_callback=my_fn)
@@ -34,7 +34,7 @@ from urllib.error import URLError
 log = logging.getLogger(__name__)
 
 GITHUB_API_RELEASES = "https://api.github.com/repos/Hamlib/Hamlib/releases/latest"
-USER_AGENT = "VARAterm-HamlibUpdater/1.0"
+USER_AGENT = "AetherTerm-HamlibUpdater/1.0"
 
 
 def _make_ssl_context():
@@ -74,14 +74,14 @@ class HamlibDownloader:
 
     def __init__(self, install_dir: Optional[Path] = None):
         if install_dir is None:
-            # Default: <VARA Term app data>/hamlib
+            # Default: <Aether Term app data>/hamlib
             if os.name == "nt":
                 base = Path(os.environ.get(
                     "APPDATA",
                     Path.home() / "AppData" / "Roaming"))
             else:
                 base = Path.home() / ".config"
-            install_dir = base / "VARA Term" / "hamlib"
+            install_dir = base / "Aether Term" / "hamlib"
         self._install_dir = Path(install_dir)
         self._version_file = self._install_dir / "version.json"
 

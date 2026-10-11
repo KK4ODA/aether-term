@@ -1,5 +1,5 @@
 """
-gui/theme.py — Design system for VARA Term.
+gui/theme.py — Design system for Aether Term.
 
 Single source of truth for colors, the global stylesheet, and
 reusable style helpers.  Every hex color literal in the GUI codebase
@@ -91,7 +91,7 @@ _ARROW_UP_SVG = (
 )
 
 # Write to a temp directory that persists for the process lifetime.
-_icon_dir = _tempfile.mkdtemp(prefix="vterm_icons_")
+_icon_dir = _tempfile.mkdtemp(prefix="aetherterm_icons_")
 
 
 def _write_svg(name: str, content: str) -> str:

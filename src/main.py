@@ -1,8 +1,9 @@
 """
-main.py — VARA Term application entry point.
+main.py — Aether Term application entry point.
 
-VARA BBS Terminal Client — a PyQt6 desktop application for connecting
-to amateur radio BBS systems over VARA FM and VARA HF modems.
+Aether Term (formerly VARA Term) — a PyQt6 desktop BBS terminal for
+connecting to amateur radio BBS systems over VARA FM, VARA HF, the
+open-source Aether HF modem, and AGWPE packet TNCs.
 """
 
 import sys
@@ -14,10 +15,10 @@ from logging.handlers import RotatingFileHandler
 
 def setup_logging():
     """Configure application logging with rotating file handler."""
-    logs_dir = Path.home() / "VARA Term" / "logs"
+    logs_dir = Path.home() / "Aether Term" / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
 
-    log_file = logs_dir / "vterm.log"
+    log_file = logs_dir / "aether-term.log"
 
     # Root logger
     root = logging.getLogger()
@@ -44,13 +45,13 @@ def setup_logging():
 
     logging.getLogger("PyQt6").setLevel(logging.WARNING)
 
-    return logging.getLogger("vterm")
+    return logging.getLogger("aetherterm")
 
 
 def main():
     log = setup_logging()
     log.info("=" * 60)
-    log.info("VARA Term starting")
+    log.info("Aether Term starting")
     log.info("=" * 60)
 
     try:
@@ -67,8 +68,9 @@ def main():
         from gui.main_window import MainWindow
 
         app = QApplication(sys.argv)
-        app.setApplicationName("VARA Term")
-        app.setApplicationDisplayName("VARA Term — VARA BBS Terminal Client")
+        app.setApplicationName("Aether Term")
+        app.setApplicationDisplayName(
+            "Aether Term — BBS Terminal Client for VARA and Aether HF")
 
         # Load configuration
         config = Config()
@@ -108,13 +110,13 @@ def main():
         updater = Updater(config)
         window.set_updater(updater)
 
-        log.info("VARA Term GUI launched")
+        log.info("Aether Term GUI launched")
         sys.exit(app.exec())
 
     except Exception as e:
         log.exception(f"Fatal error: {e}")
         print(f"\n[FATAL] {e}")
-        print(f"Check logs at: {Path.home() / 'VARA Term' / 'logs' / 'vterm.log'}\n")
+        print(f"Check logs at: {Path.home() / 'Aether Term' / 'logs' / 'aether-term.log'}\n")
         sys.exit(1)
 
 

@@ -1,5 +1,5 @@
 """
-gui/settings_dialog.py — Settings/configuration dialog for VARA Term.
+gui/settings_dialog.py — Settings/configuration dialog for Aether Term.
 
 Four tabs: Terminal Setup, Modem Configuration, Security, Macros.
 Each tab wraps its content in a QScrollArea so nothing is clipped
@@ -26,7 +26,7 @@ class SettingsDialog(QDialog):
     def __init__(self, config, parent=None):
         super().__init__(parent)
         self.config = config
-        self.setWindowTitle("VARA Term Settings")
+        self.setWindowTitle("Aether Term Settings")
         self.setMinimumWidth(520)
         self.setMinimumHeight(460)
         self.resize(560, 580)  # comfortable default
@@ -93,20 +93,27 @@ class SettingsDialog(QDialog):
         layout.addWidget(id_group)
 
         # Mode group
-        mode_group = QGroupBox("VARA Mode")
+        mode_group = QGroupBox("Modem")
         mode_layout = QHBoxLayout(mode_group)
         self.mode_group = QButtonGroup(self)
         self.fm_radio = QRadioButton("VARA FM")
         self.fm_radio.setToolTip("VHF/UHF via VARA FM modem.")
         self.hf_radio = QRadioButton("VARA HF")
         self.hf_radio.setToolTip("HF via VARA HF modem (requires PTT control).")
+        self.aether_radio = QRadioButton("Aether HF")
+        self.aether_radio.setToolTip(
+            "HF via the open-source Aether HF modem, over its\n"
+            "VARA-compatible host port. Talks only to other\n"
+            "Aether HF stations on the air.")
         self.agwpe_radio = QRadioButton("Soundmodem (AGWPE)")
         self.agwpe_radio.setToolTip("AX.25 packet via Soundmodem, Direwolf,\nor any AGWPE-compatible TNC.")
         self.mode_group.addButton(self.fm_radio)
         self.mode_group.addButton(self.hf_radio)
+        self.mode_group.addButton(self.aether_radio)
         self.mode_group.addButton(self.agwpe_radio)
         mode_layout.addWidget(self.fm_radio)
         mode_layout.addWidget(self.hf_radio)
+        mode_layout.addWidget(self.aether_radio)
         mode_layout.addWidget(self.agwpe_radio)
         layout.addWidget(mode_group)
 
@@ -123,6 +130,20 @@ class SettingsDialog(QDialog):
         )
         hf_form.addRow("Session Bandwidth (Hz):", self.hf_bw_combo)
         layout.addWidget(self.hf_bw_group)
+
+        # Aether HF Settings — only visible when Aether HF mode selected
+        self.aether_bw_group = QGroupBox("Aether HF Settings")
+        aether_form = QFormLayout(self.aether_bw_group)
+        self.aether_bw_combo = QComboBox()
+        self.aether_bw_combo.addItems(["2300", "500"])
+        self.aether_bw_combo.setToolTip(
+            "Aether HF waveform bandwidth, sent as BW2300 / BW500.\n"
+            "2300 Hz = Winlink-style BBS links (default).\n"
+            "500 Hz = peer-to-peer and narrow calling frequencies.\n"
+            "Both stations of a session must use the same one."
+        )
+        aether_form.addRow("Bandwidth (Hz):", self.aether_bw_combo)
+        layout.addWidget(self.aether_bw_group)
 
         # FM Settings — only visible when FM mode selected
         self.fm_bw_group = QGroupBox("FM Settings")
@@ -172,6 +193,8 @@ class SettingsDialog(QDialog):
         self.fm_radio.toggled.connect(self._update_modem_groups)
         self.hf_radio.toggled.connect(self._update_bw_groups)
         self.hf_radio.toggled.connect(self._update_modem_groups)
+        self.aether_radio.toggled.connect(self._update_bw_groups)
+        self.aether_radio.toggled.connect(self._update_modem_groups)
         self.agwpe_radio.toggled.connect(self._update_bw_groups)
         self.agwpe_radio.toggled.connect(self._update_modem_groups)
 
@@ -211,8 +234,8 @@ class SettingsDialog(QDialog):
         self.fm_cmd_port.valueChanged.connect(
             lambda v: self.fm_data_port.setValue(v + 1))
         fm_form.addRow("Data Port:", self.fm_data_port)
-        self.fm_auto_launch = QCheckBox("Start VARA FM with VARA Term (and close on exit)")
-        self.fm_auto_launch.setToolTip("Automatically start VARA FM modem when\nVARA Term launches, and close it on exit.")
+        self.fm_auto_launch = QCheckBox("Start VARA FM with Aether Term (and close on exit)")
+        self.fm_auto_launch.setToolTip("Automatically start VARA FM modem when\nAether Term launches, and close it on exit.")
         fm_form.addRow(self.fm_auto_launch)
         self.fm_exe_path = QLineEdit()
         self.fm_exe_path.setPlaceholderText(r"C:\VARA FM\VARAFM.exe")
@@ -244,8 +267,8 @@ class SettingsDialog(QDialog):
         self.hf_cmd_port.valueChanged.connect(
             lambda v: self.hf_data_port.setValue(v + 1))
         hf_form.addRow("Data Port:", self.hf_data_port)
-        self.hf_auto_launch = QCheckBox("Start VARA HF with VARA Term (and close on exit)")
-        self.hf_auto_launch.setToolTip("Automatically start VARA HF modem when\nVARA Term launches, and close it on exit.")
+        self.hf_auto_launch = QCheckBox("Start VARA HF with Aether Term (and close on exit)")
+        self.hf_auto_launch.setToolTip("Automatically start VARA HF modem when\nAether Term launches, and close it on exit.")
         hf_form.addRow(self.hf_auto_launch)
         self.hf_exe_path = QLineEdit()
         self.hf_exe_path.setPlaceholderText(r"C:\VARA HF\VARA HF.exe")
@@ -258,20 +281,83 @@ class SettingsDialog(QDialog):
         hf_form.addRow("Executable:", hf_exe_row)
         layout.addWidget(self.hf_modem_group)
 
+        # Aether HF Modem
+        self.aether_modem_group = QGroupBox("Aether HF Modem")
+        ae_form = QFormLayout(self.aether_modem_group)
+        ae_info = QLabel(
+            "Aether HF's VARA-compatible port is off by default: in\n"
+            "Aether HF, Setup step 5, turn on \"Host programs\" (8300).\n"
+            "Its control API (8515) is read for status and diagnostics."
+        )
+        ae_info.setStyleSheet(info_style("0 0 6px 0"))
+        ae_form.addRow(ae_info)
+        self.aether_host = QLineEdit()
+        self.aether_host.setToolTip("IP address of the Aether HF modem.\nUsually 127.0.0.1 for local.")
+        ae_form.addRow("Host:", self.aether_host)
+        self.aether_cmd_port = QSpinBox()
+        self.aether_cmd_port.setRange(1, 65534)
+        self.aether_cmd_port.setToolTip("Aether HF host-program command port (default: 8300).")
+        ae_form.addRow("Command Port:", self.aether_cmd_port)
+        self.aether_data_port = QSpinBox()
+        self.aether_data_port.setRange(2, 65535)
+        self.aether_data_port.setReadOnly(True)
+        self.aether_data_port.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
+        self.aether_data_port.setToolTip("Data port is always Command Port + 1.")
+        self.aether_data_port.setStyleSheet("background: #3a3a3a; color: #888;")
+        self.aether_cmd_port.valueChanged.connect(
+            lambda v: self.aether_data_port.setValue(v + 1))
+        ae_form.addRow("Data Port:", self.aether_data_port)
+        self.aether_control_port = QSpinBox()
+        self.aether_control_port.setRange(1, 65535)
+        self.aether_control_port.setToolTip(
+            "Aether HF control API port (default: 8515).\n"
+            "Used read-only for modem status, rules and faults.")
+        ae_form.addRow("Control API Port:", self.aether_control_port)
+        self.aether_host_ptt = QCheckBox("Aether HF keying is \"host program\" — key the radio here")
+        self.aether_host_ptt.setToolTip(
+            "Leave off when Aether HF keys the radio itself (CAT, serial,\n"
+            "CM108 or rigctld) — the usual setup, with its rules check on.\n"
+            "Turn on only if Aether HF Setup step 2 is set to \"host program\";\n"
+            "Aether Term then keys the radio on PTT ON with the PTT method below.")
+        ae_form.addRow(self.aether_host_ptt)
+        self.aether_auto_launch = QCheckBox("Start Aether HF with Aether Term (and close on exit)")
+        ae_form.addRow(self.aether_auto_launch)
+        self.aether_exe_path = QLineEdit()
+        self.aether_exe_path.setPlaceholderText(r"%LOCALAPPDATA%\Aether HF\aether-hf.exe")
+        self.aether_exe_path.setMinimumWidth(200)
+        ae_browse = QPushButton("Browse...")
+        ae_browse.clicked.connect(lambda: self._browse_exe(self.aether_exe_path))
+        ae_exe_row = QHBoxLayout()
+        ae_exe_row.addWidget(self.aether_exe_path)
+        ae_exe_row.addWidget(ae_browse)
+        ae_form.addRow("Executable:", ae_exe_row)
+        ae_test_row = QHBoxLayout()
+        self.aether_test_btn = QPushButton("Test Aether HF")
+        self.aether_test_btn.setToolTip("Ask the modem's control API for its status.")
+        self.aether_test_btn.clicked.connect(self._test_aether)
+        ae_test_row.addWidget(self.aether_test_btn)
+        ae_test_row.addStretch()
+        ae_form.addRow(ae_test_row)
+        self.aether_test_result = QLabel("")
+        self.aether_test_result.setWordWrap(True)
+        self.aether_test_result.setStyleSheet(info_style())
+        ae_form.addRow(self.aether_test_result)
+        layout.addWidget(self.aether_modem_group)
+
         # PTT (HF only — FM handles PTT internally)
         self.ptt_group = QGroupBox("HF PTT Control (OmniRig)")
         ptt_form = QFormLayout(self.ptt_group)
         ptt_info = QLabel(
-            "VARA FM handles PTT internally. For VARA HF, PTT is\n"
-            "controlled via OmniRig (requires OmniRig + pywin32).\n"
-            "Set to 'None' if your radio uses VOX."
+            "VARA FM handles PTT internally. For VARA HF (and Aether HF\n"
+            "set to 'host program' keying), PTT is controlled via OmniRig\n"
+            "(requires OmniRig + pywin32). Set to 'None' if your radio uses VOX."
         )
         ptt_info.setStyleSheet(info_style("0 0 6px 0"))
         ptt_form.addRow(ptt_info)
         self.hf_ptt_method = QComboBox()
         self.hf_ptt_method.addItems(["None (VOX)", "OmniRig"])
         self.hf_ptt_method.setToolTip(
-            "PTT control method for VARA HF.\n"
+            "PTT control method for VARA HF / host-keyed Aether HF.\n"
             "None (VOX) = radio handles PTT automatically.\n"
             "OmniRig = software PTT via OmniRig COM server."
         )
@@ -386,17 +472,36 @@ class SettingsDialog(QDialog):
 
     def _browse_exe(self, target: QLineEdit):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Select VARA Executable", "",
+            self, "Select Modem Executable", "",
             "Executables (*.exe);;All Files (*)")
         if path:
             target.setText(path)
 
+    def _test_aether(self):
+        """Query the Aether HF control API and show what it says."""
+        from aether.control import AetherControl, AETHER_RELEASES_URL
+        host = self.aether_host.text().strip() or "127.0.0.1"
+        url = f"http://{host}:{self.aether_control_port.value()}"
+        snap = AetherControl(url).snapshot()
+        if not snap.reachable:
+            self.aether_test_result.setText(
+                f"Not reachable at {url}. Is Aether HF running?\n"
+                f"Download: {AETHER_RELEASES_URL}")
+            return
+        lines = [f"Aether HF {snap.version} — {snap.bandwidth_hz or '?'} Hz, "
+                 f"state {snap.state or '?'}, callsign {snap.callsign or '(none)'}"]
+        problems = snap.problems
+        if problems:
+            lines += [f"• {p}" for p in problems]
+        else:
+            lines.append("Host port on, rules set, keying and sound card OK.")
+        self.aether_test_result.setText("\n".join(lines))
+
     def _update_bw_groups(self):
         """Show only the active mode's bandwidth group."""
-        is_fm = self.fm_radio.isChecked()
-        is_agwpe = self.agwpe_radio.isChecked()
-        self.fm_bw_group.setVisible(is_fm)
-        self.hf_bw_group.setVisible(not is_fm and not is_agwpe)
+        self.fm_bw_group.setVisible(self.fm_radio.isChecked())
+        self.hf_bw_group.setVisible(self.hf_radio.isChecked())
+        self.aether_bw_group.setVisible(self.aether_radio.isChecked())
 
     def _update_modem_groups(self):
         """Show/hide modem groups based on mode selection.
@@ -409,15 +514,18 @@ class SettingsDialog(QDialog):
         is_fm = self.fm_radio.isChecked()
         is_agwpe = self.agwpe_radio.isChecked()
         is_hf = self.hf_radio.isChecked()
+        is_aether = self.aether_radio.isChecked()
 
         self.fm_modem_group.setEnabled(is_fm)
         self.hf_modem_group.setEnabled(is_hf)
-        self.ptt_group.setEnabled(is_hf)
+        self.aether_modem_group.setEnabled(is_aether)
+        self.ptt_group.setEnabled(is_hf or is_aether)
         self.agwpe_group.setEnabled(is_agwpe)
 
         # Auto-launch checkboxes should always be editable
         self.fm_auto_launch.setEnabled(True)
         self.hf_auto_launch.setEnabled(True)
+        self.aether_auto_launch.setEnabled(True)
 
     # ── Load / Save ────────────────────────────────────────────────
 
@@ -429,6 +537,8 @@ class SettingsDialog(QDialog):
         mode = c.get("vara_mode", "VARA FM")
         if mode == "VARA HF":
             self.hf_radio.setChecked(True)
+        elif mode == "Aether HF":
+            self.aether_radio.setChecked(True)
         elif mode == "AGWPE":
             self.agwpe_radio.setChecked(True)
         else:
@@ -438,6 +548,9 @@ class SettingsDialog(QDialog):
         idx = self.hf_bw_combo.findText(bw)
         if idx >= 0:
             self.hf_bw_combo.setCurrentIndex(idx)
+
+        ae_bw = 500 if int(c.get("aether_bandwidth", 2300)) == 500 else 2300
+        self.aether_bw_combo.setCurrentText(str(ae_bw))
 
         fm_bw = c.get("fm_bandwidth", "NARROW")
         idx = self.fm_bw_combo.findText(fm_bw)
@@ -462,6 +575,14 @@ class SettingsDialog(QDialog):
         self.hf_data_port.setValue(c.get("vara_hf_data_port", 8301))
         self.hf_auto_launch.setChecked(c.get("vara_hf_auto_launch", True))
         self.hf_exe_path.setText(c.get("vara_hf_exe_path", r"C:\VARA HF\VARA HF.exe"))
+
+        self.aether_host.setText(c.get("aether_host", "127.0.0.1"))
+        self.aether_cmd_port.setValue(c.get("aether_cmd_port", 8300))
+        self.aether_data_port.setValue(c.get("aether_data_port", 8301))
+        self.aether_control_port.setValue(c.get("aether_control_port", 8515))
+        self.aether_host_ptt.setChecked(c.get("aether_host_ptt", False))
+        self.aether_auto_launch.setChecked(c.get("aether_auto_launch", False))
+        self.aether_exe_path.setText(c.get("aether_exe_path", ""))
 
         ptt = c.get("hf_ptt_method", "None (VOX)")
         idx = self.hf_ptt_method.findText(ptt)
@@ -498,6 +619,8 @@ class SettingsDialog(QDialog):
             c.set("vara_mode", "AGWPE")
         elif self.hf_radio.isChecked():
             c.set("vara_mode", "VARA HF")
+        elif self.aether_radio.isChecked():
+            c.set("vara_mode", "Aether HF")
         else:
             c.set("vara_mode", "VARA FM")
         c.set("hf_bandwidth", int(self.hf_bw_combo.currentText()))
@@ -519,6 +642,15 @@ class SettingsDialog(QDialog):
         c.set("vara_hf_data_port", self.hf_cmd_port.value() + 1)
         c.set("vara_hf_auto_launch", self.hf_auto_launch.isChecked())
         c.set("vara_hf_exe_path", self.hf_exe_path.text())
+
+        c.set("aether_bandwidth", int(self.aether_bw_combo.currentText()))
+        c.set("aether_host", self.aether_host.text().strip() or "127.0.0.1")
+        c.set("aether_cmd_port", self.aether_cmd_port.value())
+        c.set("aether_data_port", self.aether_cmd_port.value() + 1)
+        c.set("aether_control_port", self.aether_control_port.value())
+        c.set("aether_host_ptt", self.aether_host_ptt.isChecked())
+        c.set("aether_auto_launch", self.aether_auto_launch.isChecked())
+        c.set("aether_exe_path", self.aether_exe_path.text().strip())
 
         c.set("hf_ptt_method", self.hf_ptt_method.currentText())
         c.set("omnirig_rig_number", self.omnirig_rig_spin.value())

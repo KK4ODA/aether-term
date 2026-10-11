@@ -1,5 +1,5 @@
 """
-auth.py — HMAC-SHA256 authentication for VARA Term.
+auth.py — HMAC-SHA256 authentication for Aether Term.
 
 Monitors the incoming data stream for BBS auth challenges and
 automatically computes + sends the HMAC response.

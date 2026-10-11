@@ -1,5 +1,5 @@
 """
-gui/terminal_widget.py — Terminal display and command input for VARA Term.
+gui/terminal_widget.py — Terminal display and command input for Aether Term.
 
 A read-only monospaced text area for BBS output with color coding,
 plus a single-line command input with history (up/down arrows).
