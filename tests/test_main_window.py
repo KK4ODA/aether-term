@@ -127,6 +127,23 @@ def test_bad_digipeater_path_stops_the_call(qapp, win, monkeypatch, via1, expect
     assert win.fake.commands == []
 
 
+@pytest.mark.parametrize("chunks", [
+    ["KE4QCM-7} Welcome to the node\rCMD:\r"],              # BPQ: bare CR
+    ["KE4QCM-7} Welcome to the node\r", "\nCMD:\r\n"],       # CR LF split across chunks
+    ["KE4QCM-7} Welcome to the node\nCMD:\n"],               # bare LF
+    ["KE4QCM-7} Wel", "come to the node\r\n", "CMD:\r"],
+])
+def test_incoming_lines_end_in_cr_lf_or_both(qapp, win, chunks):
+    for c in chunks:
+        win._on_data_received(c)
+    shown = text(win)
+    assert "KE4QCM-7} Welcome to the node" in shown
+    assert "CMD:" in shown
+    # A CR LF never turns into an extra blank line
+    assert "node\n\n" not in shown
+    assert win._data_buffer == ""
+
+
 def test_wrong_modem_on_port_is_reported(qapp, win):
     win.fake.state["version_reply"] = "VERSION VARA HF 4.8.7"
     win._on_connect()

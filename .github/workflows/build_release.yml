@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to build and attach to (e.g. v1.1.1); empty = dry run"
+        description: "Release tag to build and publish (e.g. v1.1.2; created on the selected branch if missing); empty = dry run"
         required: false
         default: ""
 
@@ -28,7 +28,24 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ env.TAG || github.ref }}
+          ref: ${{ github.ref }}
+          fetch-depth: 0     # with tags, to find the release tag below
+
+      # Build the tag when it exists.  Run by hand for a tag that does not
+      # exist yet, build the selected branch and let the release step create
+      # the tag on this exact commit.
+      - name: Select the commit to build
+        if: env.TAG != ''
+        run: |
+          # "git tag -l" exits 0 either way; it prints the tag only if it exists
+          if (git tag -l $env:TAG) {
+            git checkout -q "refs/tags/$env:TAG"
+            "Building existing tag $env:TAG"
+          } else {
+            $sha = (git rev-parse HEAD).Trim()
+            "TARGET_SHA=$sha" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+            "Tag $env:TAG does not exist: building $sha; the release step will create the tag there"
+          }
 
       - name: Check version.txt against the tag
         if: env.TAG != ''
@@ -95,6 +112,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG }}
+          target_commitish: ${{ env.TARGET_SHA }}
           # Run by hand, this step creates the release when the tag has none:
           # give it a title and this version's CHANGELOG notes.  A release
           # published on GitHub keeps the title and notes written there.

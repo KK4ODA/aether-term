@@ -86,9 +86,10 @@ It stops if `version.txt` does not match the tag. To try the build before
 tagging, run the workflow by hand with an empty tag: the files are kept as
 workflow artifacts. `build.bat` builds the same files locally.
 
-Alternatively, push the tag (`git tag vX.Y.Z && git push origin vX.Y.Z`) and run
-the workflow by hand with that tag: it creates and publishes the release
-itself, titled "Aether Term X.Y.Z" with the CHANGELOG section as its notes.
+Alternatively, run the workflow by hand on `main` with tag `vX.Y.Z`: it creates
+the tag on `main`'s latest commit (or builds the tag if you already pushed it),
+then creates and publishes the release itself, titled "Aether Term X.Y.Z" with
+the CHANGELOG section as its notes.
 
 ------------------------------------------------------------------------
 
