@@ -74,6 +74,8 @@ class MainWindow(QMainWindow):
         self._session_start: Optional[datetime] = None
         self._data_buffer = ""
         self._data_ended_cr = False       # last data chunk ended in CR
+        self._remote_eol = ""             # BBS line end once seen: "\r\n", "\r" or "\n"
+        self._transport_query_pending = False
         self._active_profile: Optional[dict] = None
         self._rf_session_up = False    # a CONNECTED was seen for this call
 
@@ -545,6 +547,12 @@ class MainWindow(QMainWindow):
                 "through digipeaters.")
         self._connect_in_progress = True
         self._rf_session_up = False
+        # The BBS's line ends are learned afresh for each call.  ;TRANSPORT?
+        # is an Aether BBS extension: it goes out only once the BBS shows
+        # CR LF line ends — a BPQ node (bare CR) would take it as a bad
+        # command.
+        self._remote_eol = ""
+        self._transport_query_pending = True
         self.speed_label.setText("Speed: —")
         self._cleanup_timer.stop()  # cancel any stale cleanup timer
 
@@ -667,8 +675,8 @@ class MainWindow(QMainWindow):
         if self.config.get("session_logging"):
             self._start_session_log(remote)
 
-        # Query BBS transport type
-        QTimer.singleShot(1000, self._query_transport)
+        # ;TRANSPORT? is sent by _note_line_ending once the BBS shows CR LF
+        # line ends (set up in _begin_connect).
 
     @pyqtSlot()
     def _on_rf_disconnected(self):
@@ -730,8 +738,44 @@ class MainWindow(QMainWindow):
                 "Not connected — command not sent.")
             return
         self.terminal.display.append_text(f"> {text}\n", "dim")
-        self.modem.send_data(text + "\r\n")
+        self.modem.send_data(text + self._line_end())
         self._log_line(f"> {text}")
+
+    def _line_end(self) -> str:
+        """Line end for what the user types: the BBS's own convention.
+
+        BPQ nodes (and most packet BBSes) end lines with a bare CR and read
+        an LF after it as the start of the next command; the Aether BBS
+        uses CR LF.  A BPQ node says nothing until spoken to, so before the
+        BBS has sent a line end the answer is a bare CR; a BBS that greets
+        first (the Aether BBS) has shown its CR LF by the time you type.
+        """
+        return "\r\n" if self._remote_eol in ("\r\n", "\n") else "\r"
+
+    def _note_line_ending(self, text: str):
+        """Learn the BBS's line end from the data it sends.
+
+        CR LF evidence (in one chunk, or a CR ending one chunk and an LF
+        starting the next) is final.  A bare CR — inside a chunk, or ending
+        one, as BPQ's replies do — means CR until CR LF evidence turns up.
+        """
+        if "\r\n" in text or (self._data_ended_cr and text.startswith("\n")):
+            eol = "\r\n"
+        elif self._remote_eol == "\r\n":
+            return
+        elif "\r" in text or self._data_ended_cr:
+            eol = "\r"
+        elif "\n" in text and not self._remote_eol:
+            eol = "\n"
+        else:
+            return
+        if eol == self._remote_eol:
+            return
+        self._remote_eol = eol
+        log.info("BBS line ends: %s", {"\r\n": "CR LF", "\r": "CR", "\n": "LF"}[eol])
+        if eol == "\r\n" and self._transport_query_pending:
+            self._transport_query_pending = False
+            QTimer.singleShot(0, self._query_transport)
 
     def _on_command(self, text: str):
         """User typed a command in the input bar."""
@@ -749,6 +793,7 @@ class MainWindow(QMainWindow):
         packet BBSes send CR only.  A CR LF split across two chunks counts
         as one line end.
         """
+        self._note_line_ending(text)
         if self._data_ended_cr and text.startswith("\n"):
             text = text[1:]
         self._data_ended_cr = text.endswith("\r")

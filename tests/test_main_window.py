@@ -144,6 +144,54 @@ def test_incoming_lines_end_in_cr_lf_or_both(qapp, win, chunks):
     assert win._data_buffer == ""
 
 
+def _sent(win):
+    return b"".join(win.fake.data)
+
+
+def test_aether_bbs_gets_cr_lf_and_transport_query(qapp, win):
+    """The Aether BBS (CR LF lines) is asked ;TRANSPORT? and gets CR LF."""
+    win._on_connect()
+    assert pump(qapp, until=lambda: "Welcome to the test BBS" in text(win), timeout=15)
+    assert pump(qapp, until=lambda: b";TRANSPORT?\r\n" in _sent(win))
+    win._send_text("H")
+    assert pump(qapp, until=lambda: b"H\r\n" in _sent(win))
+
+
+def test_bpq_node_gets_bare_cr_and_no_transport_query(qapp, win):
+    """A BPQ node ends lines with a bare CR, and reads an LF after the CR
+    as the start of the next command: answer it in its own convention."""
+    win.fake.state["bbs"] = "bpq"
+    win._on_connect()
+    assert pump(qapp, until=lambda: "CONNECTED to W1AW-5" in text(win), timeout=15)
+    pump(qapp, 1.5)                       # the old fixed-delay query fired at 1 s
+    assert _sent(win) == b""              # nothing unasked-for went to the node
+    win._send_text("H")                   # node silent so far: bare CR
+    assert pump(qapp, until=lambda: "Help file not found" in text(win))
+    win._send_text("?")
+    win._send_text("CHAT")
+    assert pump(qapp, until=lambda: _sent(win).endswith(b"CHAT\r"))
+    assert _sent(win) == b"H\r?\rCHAT\r"
+    assert b";TRANSPORT?" not in _sent(win)
+
+
+@pytest.mark.parametrize("chunks,eol", [
+    ([], None),                                               # nothing yet: bare CR
+    (["STONEM:KE4QCM-7} Help file not found\r"], "\r"),      # BPQ reply
+    (["STONEM:KE4QCM-7} Help\rnext"], "\r"),
+    (["line\r", "\nnext"], "\r\n"),                         # CR LF split across chunks
+    (["Welcome\r\n", "prompt\r"], "\r\n"),                 # CR LF evidence is final
+    (["line\r", "next\r"], "\r"),
+    (["line\n"], "\n"),
+])
+def test_line_end_detection(qapp, win, chunks, eol):
+    win._remote_eol = ""
+    win._transport_query_pending = False
+    for c in chunks:
+        win._on_data_received(c)
+    assert (win._remote_eol or None) == eol
+    assert win._line_end() == ("\r\n" if eol in ("\r\n", "\n") else "\r")
+
+
 def test_wrong_modem_on_port_is_reported(qapp, win):
     win.fake.state["version_reply"] = "VERSION VARA HF 4.8.7"
     win._on_connect()

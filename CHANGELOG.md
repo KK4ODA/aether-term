@@ -5,6 +5,23 @@ Format: [version] — YYYY-MM-DD, then a bulleted list of changes.
 
 ---
 
+## [1.1.3] — 2026-10-13
+
+### Fixed
+
+- **Commands to BPQ nodes work.** Typed lines always ended in CR LF. A BPQ
+  node ends a command at the CR and keeps the LF as the first character of
+  the next one, so every command after the first arrived garbled. Aether Term
+  now answers in the BBS's own convention, learned from what the BBS sends:
+  a bare CR for BPQ and most packet nodes, CR LF for the Aether BBS. A BPQ
+  node says nothing until spoken to, so the first line goes out with a bare
+  CR. A BBS that greets first shows its CR LF before you type.
+  *(gui/main_window.py)*
+- **No `;TRANSPORT?` to BBSes that don't know it.** The Aether BBS transport
+  query used to go out one second after every connect, and a BPQ node read it
+  as a bad command. It is now sent only once the BBS has shown CR LF line
+  ends, as the Aether BBS does. *(gui/main_window.py)*
+
 ## [1.1.2] — 2026-10-13
 
 ### Fixed

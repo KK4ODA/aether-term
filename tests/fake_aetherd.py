@@ -55,6 +55,8 @@ class FakeAetherd:
             "remote": None,
             "answer_connect": True,      # False: refuse with DISCONNECTED
             "reject_connect": False,     # True: answer CONNECT with WRONG
+            "bbs": "aether",             # "bpq": a BPQ node — silent until spoken
+                                         # to, bare-CR line ends
             "version_reply": f"VERSION Aether HF {VERSION}",
             "status_delay": 0.0,         # seconds before /v1/status answers
         }
@@ -165,7 +167,10 @@ class FakeAetherd:
                 return
             self.data.append(b)
             if b.strip().upper() == b"H":
-                d.sendall(b"Help: L R S B\r\n")
+                if self.state["bbs"] == "bpq":
+                    d.sendall(b"STONEM:KE4QCM-7} Help file not found\r")
+                else:
+                    d.sendall(b"Help: L R S B\r\n")
 
     def _cmd_loop(self, c: socket.socket, d: socket.socket):
         buf = b""
@@ -206,7 +211,8 @@ class FakeAetherd:
                     c.sendall(f"CONNECTED {me} {them} 2300\r".encode())
                 c.sendall(b"ENCRYPTION DISABLED\rLINK REGISTERED\r")
                 c.sendall(b"BITRATE (9) 1450 BPS\r")
-                d.sendall(b"Welcome to the test BBS\r\n")
+                if self.state["bbs"] != "bpq":
+                    d.sendall(b"Welcome to the test BBS\r\n")
             else:
                 c.sendall(b"DISCONNECTED\r")
         elif up == "DISCONNECT":
