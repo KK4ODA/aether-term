@@ -117,6 +117,13 @@ class FakeAetherd:
                 pass
 
             def do_POST(self):
+                # Read the request body before answering: closing a socket
+                # with unread data sends a TCP reset, which on Windows can
+                # discard the response before the client reads it (the
+                # client then sees the control API as unreachable).
+                length = int(self.headers.get("Content-Length") or 0)
+                if length:
+                    self.rfile.read(length)
                 method = self.path.rsplit("/", 1)[-1]
                 if method == "status":
                     time.sleep(fake.state["status_delay"])

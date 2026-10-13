@@ -51,7 +51,7 @@ def test_status_bar_shows_aether(qapp, win):
 def test_preflight_stops_the_call(qapp, win, change, expected):
     win.fake.state.update(change)
     win._on_connect()
-    assert pump(qapp, until=lambda: "Not connecting" in text(win))
+    assert pump(qapp, until=lambda: "Not connecting" in text(win)), text(win)[-600:]
     assert expected in text(win)
     assert win.fake.commands == []
     assert win.connect_btn.isEnabled()
