@@ -5,7 +5,7 @@ Format: [version] — YYYY-MM-DD, then a bulleted list of changes.
 
 ---
 
-## [Unreleased]
+## [1.1.2] — 2026-10-13
 
 ### Fixed
 
@@ -14,6 +14,13 @@ Format: [version] — YYYY-MM-DD, then a bulleted list of changes.
   banner, prompts and command replies piled up unseen and the node seemed not
   to answer. CR, LF and CR LF now all end a line, including a CR LF split
   across two chunks. *(gui/main_window.py)*
+
+### Build
+
+- **The release workflow can create the tag.** Run by hand with a tag that
+  doesn't exist yet, it builds the selected branch and creates the tag on that
+  commit when it publishes the release. An existing tag is still built as it
+  is. *(.github/workflows/build_release.yml)*
 
 ## [1.1.1] — 2026-10-13
 
