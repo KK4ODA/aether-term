@@ -69,6 +69,15 @@ jobs:
           Compress-Archive -Path $setup -DestinationPath "dist/Aether_Term_Setup_$version.zip"
           Compress-Archive -Path "dist/Aether Term" -DestinationPath "dist/Aether_Term_Portable_$version.zip"
           Get-ChildItem dist -File | Format-Table Name, Length
+          # Release notes: this version's CHANGELOG section
+          $lines = Get-Content CHANGELOG.md -Encoding UTF8
+          $start = [array]::FindIndex($lines, [Predicate[string]]{ param($l) $l.StartsWith("## [$version]") })
+          if ($start -lt 0) { throw "CHANGELOG.md has no '## [$version]' section" }
+          $end = [array]::FindIndex($lines, $start + 1, [Predicate[string]]{ param($l) $l.StartsWith("## [") })
+          if ($end -lt 0) { $end = $lines.Count }
+          $lines[($start + 1)..($end - 1)] | Set-Content -Encoding UTF8 dist/RELEASE_NOTES.md
+          "Release notes:"; Get-Content dist/RELEASE_NOTES.md
+          "VERSION=$version" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
 
       - name: Keep the build (dry run)
         if: env.TAG == ''
@@ -76,6 +85,7 @@ jobs:
         with:
           name: aether-term-build
           path: |
+            dist/RELEASE_NOTES.md
             dist/Aether_Term_Setup_*.exe
             dist/Aether_Term_Setup_*.zip
             dist/Aether_Term_Portable_*.zip
@@ -85,6 +95,11 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG }}
+          # Run by hand, this step creates the release when the tag has none:
+          # give it a title and this version's CHANGELOG notes.  A release
+          # published on GitHub keeps the title and notes written there.
+          name: ${{ github.event_name == 'workflow_dispatch' && format('Aether Term {0}', env.VERSION) || '' }}
+          body_path: ${{ github.event_name == 'workflow_dispatch' && 'dist/RELEASE_NOTES.md' || '' }}
           files: |
             dist/Aether_Term_Setup_*.exe
             dist/Aether_Term_Setup_*.zip
