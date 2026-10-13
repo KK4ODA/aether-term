@@ -41,6 +41,15 @@ from gui.profile_dialog import ProfileDialog
 
 log = logging.getLogger(__name__)
 
+# Signals the window connects on a modem (VARA or AGWPE); disconnected
+# when a modem is swapped out.
+_MODEM_SIGNALS = (
+    "state_changed", "data_received", "command_event", "sn_report",
+    "error_signal", "modem_connected", "rf_connected", "rf_disconnected",
+    "pending_signal", "busy_signal", "ptt_event",
+    "bitrate_report", "session_bandwidth", "version_report",
+)
+
 # Via 1 / Via 2 dropdowns: the "no digipeater" entry, and how many
 # digipeaters they remember.
 VIA_NONE = "None"
@@ -474,11 +483,14 @@ class MainWindow(QMainWindow):
         # HF PTT: modem emits ptt_event → PTT controller keys/unkeys radio
         self.modem.ptt_event.connect(self.ptt.on_ptt_event,
                                       Qt.ConnectionType.QueuedConnection)
-        self.ptt.ptt_changed.connect(self._on_ptt_changed,
-                                      Qt.ConnectionType.QueuedConnection)
-        self.ptt.ptt_error.connect(
-            lambda msg: self.terminal.display.append_warning(f"[PTT] {msg}"),
-            Qt.ConnectionType.QueuedConnection)
+        # The PTT controller outlives modem swaps: wire it once
+        if not getattr(self, "_ptt_wired", False):
+            self._ptt_wired = True
+            self.ptt.ptt_changed.connect(self._on_ptt_changed,
+                                          Qt.ConnectionType.QueuedConnection)
+            self.ptt.ptt_error.connect(
+                lambda msg: self.terminal.display.append_warning(f"[PTT] {msg}"),
+                Qt.ConnectionType.QueuedConnection)
 
     # ── Actions ────────────────────────────────────────────────────
 
@@ -615,16 +627,17 @@ class MainWindow(QMainWindow):
         self.modem_status_label.setText("Modem: Connected")
         self.modem_status_label.setStyleSheet(f"color: {C['success']};")
 
+        # RF CONNECT is sent when init completes (state → MODEM_CONNECTED).
+        # A one-shot connection avoids the old fixed-timer race where
+        # CONNECT fired before BW was sent on HF.  Listen *before* starting
+        # init, so a modem that finishes at once (Soundmodem) is not missed.
+        self.modem.state_changed.connect(
+            self._on_init_complete, Qt.ConnectionType.QueuedConnection)
+
         callsign = self._effective_callsign()
         self.modem.initialize_modem(
             callsign, self.config.is_hf_band, self.config.session_bandwidth,
             query_version=self.config.is_aether)
-
-        # RF CONNECT is sent when init completes (state → MODEM_CONNECTED).
-        # A one-shot connection avoids the old fixed-timer race where
-        # CONNECT fired before BW was sent on HF.
-        self.modem.state_changed.connect(
-            self._on_init_complete, Qt.ConnectionType.QueuedConnection)
 
     @pyqtSlot(object)
     def _on_init_complete(self, new_state):
@@ -1065,9 +1078,8 @@ class MainWindow(QMainWindow):
         elif upper == "BUSY":
             pass
         elif upper == "WRONG":
-            cmd_hint = ""
-            if self.modem._last_cmd:
-                cmd_hint = f" (cmd: {self.modem._last_cmd})"
+            last_cmd = getattr(self.modem, "_last_cmd", None)
+            cmd_hint = f" (cmd: {last_cmd})" if last_cmd else ""
             self.terminal.display.append_warning(
                 f"[MODEM] Command rejected: WRONG{cmd_hint}")
         elif upper == "CANCELPENDING":
@@ -1808,7 +1820,7 @@ class MainWindow(QMainWindow):
         from vara.agwpe_modem import AGWPEModem
         if isinstance(self.modem, AGWPEModem):
             return
-        self.modem.disconnect_from_modem()
+        self._retire_modem()
         self.modem = AGWPEModem()
         self._connect_signals()
 
@@ -1816,9 +1828,27 @@ class MainWindow(QMainWindow):
         """Replace the current modem with a VARAModem if not already."""
         if isinstance(self.modem, VARAModem):
             return
-        self.modem.disconnect_from_modem()
+        self._retire_modem()
         self.modem = VARAModem()
         self._connect_signals()
+
+    def _retire_modem(self):
+        """Close the modem being replaced, without its signals reaching us.
+
+        Its last "disconnected" would otherwise arrive after the new modem
+        has started a call, clear the connect-in-progress flag, and let the
+        cleanup close the new link (switching to Soundmodem and pressing
+        Connect did exactly that).
+        """
+        old = self.modem
+        for name in _MODEM_SIGNALS:
+            sig = getattr(old, name, None)
+            if sig is not None:
+                try:
+                    sig.disconnect()
+                except TypeError:
+                    pass                    # nothing connected
+        old.disconnect_from_modem()
 
     # ── Transport detection ──────────────────────────────────────────
 

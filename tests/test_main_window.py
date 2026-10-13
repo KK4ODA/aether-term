@@ -282,6 +282,47 @@ def test_via_history_is_capped_and_most_recent_first(qapp, win):
     assert hist[0] == f"DIGI{MAX_VIA_HISTORY + 2}-1"
 
 
+@pytest.fixture
+def agwpe():
+    from fake_agwpe import FakeAGWPE
+    fake = FakeAGWPE().start()
+    yield fake
+    fake.stop()
+
+
+def test_soundmodem_session(qapp, win, agwpe):
+    """Soundmodem (AGWPE): connect, talk, disconnect — without the window
+    crashing (1.1.0–1.1.4 aborted when the TNC link came up) and without the
+    call stalling before the AX.25 connect went out."""
+    from vara.agwpe_modem import AGWPEModem
+    from vara.connection import ConnectionState
+    win.mode_combo.setCurrentIndex(3)
+    pump(qapp, 0.1)
+    assert win.config.mode == "AGWPE"
+    win.config.set("soundmodem_port", agwpe.port)
+    win._on_connect()
+    ok = pump(qapp, until=lambda: "CONNECTED to W1AW-5" in text(win), timeout=15)
+    assert ok, f"frames={agwpe.kinds()!r}\n" + text(win)[-700:]
+    assert isinstance(win.modem, AGWPEModem)
+    assert agwpe.kinds().startswith("XC")          # registered, then connected
+    win._send_text("H")
+    assert pump(qapp, until=lambda: "Help: BBS CHAT NODES BYE" in text(win))
+    assert agwpe.data_sent() == b"H\r"
+    win._on_disconnect()
+    assert pump(qapp, until=lambda: win.modem.state == ConnectionState.DISCONNECTED)
+
+
+def test_agwpe_modem_takes_the_vara_init_arguments(qapp):
+    """The main window calls initialize_modem the same way for every modem."""
+    from vara.agwpe_modem import AGWPEModem
+    from vara.connection import ConnectionState
+    m = AGWPEModem()
+    states = []
+    m.state_changed.connect(states.append)
+    m.initialize_modem("KK4ODA", False, 2300, query_version=False)
+    assert states == [ConnectionState.INITIALIZING, ConnectionState.MODEM_CONNECTED]
+
+
 def test_wrong_modem_on_port_is_reported(qapp, win):
     win.fake.state["version_reply"] = "VERSION VARA HF 4.8.7"
     win._on_connect()

@@ -18,11 +18,13 @@ from typing import Callable, Optional
 
 log = logging.getLogger(__name__)
 
-# AGWPE header: 4 bytes port + 4 bytes reserved + 1 byte data_kind + 1 byte reserved +
-#               1 byte PID + 1 byte reserved + 10 bytes callFrom + 10 bytes callTo +
-#               4 bytes dataLen + 4 bytes user = 36 bytes total
-HEADER_FMT = "<I I c x B x 10s 10s I i"
+# AGWPE header (36 bytes): port (1 byte + 3 reserved, read as a 32-bit
+# little-endian int), data_kind at offset 4, 1 reserved, PID at offset 6,
+# 1 reserved, callFrom (10) at 8, callTo (10) at 18, dataLen (4) at 28,
+# user (4) at 32.
+HEADER_FMT = "<I c x B x 10s 10s I I"
 HEADER_SIZE = 36
+assert struct.calcsize(HEADER_FMT) == HEADER_SIZE
 
 
 @dataclass
@@ -52,7 +54,6 @@ def encode_frame(frame: AGWPEFrame) -> bytes:
     header = struct.pack(
         HEADER_FMT,
         frame.port,
-        0,  # reserved
         frame.data_kind.encode("ascii"),
         frame.pid,
         _encode_call(frame.call_from),
@@ -65,7 +66,7 @@ def encode_frame(frame: AGWPEFrame) -> bytes:
 
 def decode_frame(header: bytes, data: bytes) -> AGWPEFrame:
     """Decode an AGWPE frame from header + data bytes."""
-    (port, _res1, kind_b, pid,
+    (port, kind_b, pid,
      call_from_b, call_to_b, data_len, user) = struct.unpack(HEADER_FMT, header)
     return AGWPEFrame(
         port=port,
