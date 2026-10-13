@@ -28,7 +28,7 @@ from aether.control import (AetherMonitor, AetherQuery, AetherStatus,
                             AETHER_HOST_GUIDE_URL)
 from passwords import PasswordStore
 from auth import AuthInterceptor
-from vara.modem import VARAModem
+from vara.modem import VARAModem, parse_digipeaters
 from vara.connection import ConnectionState, STATE_LABELS, STATE_COLORS
 from vara.ptt import PTTController
 from gui.theme import C, STATE_HEX, build_stylesheet, macro_btn_style, \
@@ -231,9 +231,9 @@ class MainWindow(QMainWindow):
         self.via1_input.setPlaceholderText("(optional)")
         self.via1_input.setMaximumWidth(120)
         self.via1_input.setToolTip(
-            "First digipeater in the AX.25 path.\n"
+            "First digipeater in the path (VARA FM only).\n"
             "Leave blank for direct connection.\n"
-            "Used for HF or packet routing through relay stations."
+            "Connecting via digipeaters needs a registered VARA license."
         )
         row1.addWidget(self.via1_input)
 
@@ -241,7 +241,7 @@ class MainWindow(QMainWindow):
         self.via2_input = QLineEdit()
         self.via2_input.setPlaceholderText("(optional)")
         self.via2_input.setMaximumWidth(120)
-        self.via2_input.setToolTip("Second digipeater in the AX.25 path.\nOnly needed for multi-hop routes.")
+        self.via2_input.setToolTip("Second digipeater in the path (VARA FM only).\nOnly needed for two-hop routes.")
         row1.addWidget(self.via2_input)
 
         self.connect_btn = QPushButton("  Connect  ")
@@ -446,7 +446,8 @@ class MainWindow(QMainWindow):
                 lambda v: self.speed_label.setText(f"Speed: {v}"),
                 Qt.ConnectionType.QueuedConnection)
             self.modem.session_bandwidth.connect(
-                lambda bw: self.bw_label.setText(f"BW: {bw} Hz"),
+                lambda bw: self.bw_label.setText(
+                    f"BW: {bw} Hz" if bw.isdigit() else f"BW: {bw}"),
                 Qt.ConnectionType.QueuedConnection)
             self.modem.version_report.connect(
                 self._on_version_report, Qt.ConnectionType.QueuedConnection)
@@ -480,6 +481,9 @@ class MainWindow(QMainWindow):
         if self._preflight_pending:
             return
 
+        if not self._check_digipeaters():
+            return
+
         if self.config.is_aether:
             # Ask the modem first, on a worker thread; the connect continues
             # in _on_aether_preflight once it answers (or does not).
@@ -499,18 +503,45 @@ class MainWindow(QMainWindow):
             self._begin_connect(callsign, target)
         self._update_ui_state()
 
+    def _check_digipeaters(self) -> bool:
+        """Validate the Via fields; False (after telling the user) to stop.
+
+        Only VARA FM can route through digipeaters — VARA HF, Aether HF
+        and the Soundmodem path would otherwise silently call direct.
+        """
+        try:
+            digis = parse_digipeaters(self.via1_input.text(),
+                                      self.via2_input.text())
+        except ValueError as e:
+            QMessageBox.warning(self, "Digipeater Path", str(e))
+            self.via1_input.setFocus()
+            return False
+        if digis and self.config.mode != MODE_VARA_FM:
+            QMessageBox.warning(
+                self, "Digipeater Path",
+                "Digipeaters are only supported in VARA FM mode.\n\n"
+                f"Clear Via 1 / Via 2 to call direct with "
+                f"{_MODE_LABEL.get(self.config.mode, self.config.mode)}, "
+                "or switch to VARA FM.")
+            return False
+        return True
+
     def _begin_connect(self, callsign: str, target: str):
         """Open the modem link and start the call (after any preflight)."""
         mode = self.config.mode
         is_agwpe = (mode == MODE_AGWPE)
 
-        self.terminal.display.append_system(
-            f"Connecting to {target} as {callsign} via {mode}...")
-
-        # Store target for later use
+        # Store target and digipeater path for later use
         self._target = target
-        self._via1 = self.via1_input.text().upper().strip()
-        self._via2 = self.via2_input.text().upper().strip()
+        self._via = parse_digipeaters(self.via1_input.text(),
+                                      self.via2_input.text())
+        path = f" via {', '.join(self._via)}" if self._via else ""
+        self.terminal.display.append_system(
+            f"Connecting to {target}{path} as {callsign} using {mode}...")
+        if self._via:
+            self.terminal.display.append_system(
+                "Note: VARA FM needs a registered VARA license to connect "
+                "through digipeaters.")
         self._connect_in_progress = True
         self._rf_session_up = False
         self.speed_label.setText("Speed: —")
@@ -585,12 +616,11 @@ class MainWindow(QMainWindow):
         if self.modem.state != ConnectionState.MODEM_CONNECTED:
             return
         target = getattr(self, '_target', '')
-        via1 = getattr(self, '_via1', '')
-        via2 = getattr(self, '_via2', '')
+        via = getattr(self, '_via', [])
         callsign = self._effective_callsign()
 
         self.terminal.display.append_system(f"Initiating RF connection to {target}...")
-        self.modem.rf_connect(callsign, target, via1, via2)
+        self.modem.rf_connect(callsign, target, *via)
 
     @pyqtSlot(str)
     def _on_rf_connected(self, calls_str: str):
@@ -613,7 +643,9 @@ class MainWindow(QMainWindow):
             remote = getattr(self, '_target', 'UNKNOWN')
 
         self._rf_session_up = True
-        self.terminal.display.append_success(f"*** CONNECTED to {remote} ***")
+        via = getattr(self.modem, "connected_via", [])
+        path = f" via {', '.join(via)}" if via else ""
+        self.terminal.display.append_success(f"*** CONNECTED to {remote}{path} ***")
         self.terminal.set_input_enabled(True)
         self.terminal.input.setFocus()
 
@@ -851,6 +883,21 @@ class MainWindow(QMainWindow):
         if state in (ConnectionState.CONNECTED,
                      ConnectionState.DISCONNECTED):
             self._connect_in_progress = False
+        # Falling back to MODEM_CONNECTED from a call (refused, timed out,
+        # CANCELPENDING, rejected CONNECT, or a session that ended) is the
+        # end of that connect sequence too — unlike the INITIALIZING →
+        # MODEM_CONNECTED step that precedes the CONNECT.
+        prev = getattr(self, "_prev_state", None)
+        self._prev_state = state
+        if (state == ConnectionState.MODEM_CONNECTED
+                and prev in (ConnectionState.CONNECTING,
+                             ConnectionState.CONNECTED,
+                             ConnectionState.DISCONNECTING)):
+            if prev == ConnectionState.CONNECTING and self._connect_in_progress:
+                self.terminal.display.append_warning(
+                    f"Connection to {getattr(self, '_target', '')} failed "
+                    "— closing the modem link.")
+            self._connect_in_progress = False
 
         # If we've fallen back to MODEM_CONNECTED and we're NOT in a
         # connect sequence, it means the RF session ended (DISCONNECTED
@@ -917,6 +964,10 @@ class MainWindow(QMainWindow):
                 f"[MODEM] Command rejected: WRONG{cmd_hint}")
         elif upper == "CANCELPENDING":
             self.terminal.display.append_warning("[MODEM] Connection attempt cancelled")
+        elif upper == "LINK UNREGISTERED" and getattr(self, "_via", []):
+            self.terminal.display.append_warning(
+                "[MODEM] VARA reports this link as unregistered — VARA FM "
+                "requires a VARA license to connect through digipeaters.")
         elif upper == "MISSING SOUNDCARD":
             self.terminal.display.append_error(
                 "[MODEM] The modem's sound card would not open — it can neither "
@@ -1684,14 +1735,50 @@ class MainWindow(QMainWindow):
     def set_updater(self, updater):
         """Called by main.py after construction to wire the updater."""
         self._updater = updater
+        self._manual_update_check = False
         self._updater.update_available.connect(
             self._on_update_available, Qt.ConnectionType.QueuedConnection,
         )
+        self._updater.check_finished.connect(
+            self._on_update_check_finished, Qt.ConnectionType.QueuedConnection,
+        )
+
+    def start_update_check(self, manual: bool = False):
+        """Check for a newer version in the background.
+
+        At startup (manual=False) a found update is offered in a dialog
+        unless the user skipped that version; a manual check also reports
+        "up to date" and errors.
+        """
+        if not self._updater:
+            return
+        self._manual_update_check = manual
+        self._updater.check_once_async()
 
     def _on_update_available(self, check_result):
         self._pending_update = check_result
         self._update_label.setText(check_result.label)
         self._update_label.show()
+
+    def _on_update_check_finished(self, result):
+        manual = self._manual_update_check
+        self._manual_update_check = False
+        if result.update_available:
+            skipped = self.config.get("skipped_update_version", "")
+            if manual:
+                self._show_update_dialog()
+            elif (result.version_key != skipped
+                  and self.modem.state == ConnectionState.DISCONNECTED):
+                # Don't interrupt a session; the status-bar label stays
+                self._show_update_dialog()
+        elif manual:
+            if result.error:
+                QMessageBox.warning(self, "Software Update",
+                                    f"Could not check for updates:\n{result.error}")
+            else:
+                QMessageBox.information(
+                    self, "Software Update",
+                    f"Aether Term {APP_VERSION} is the latest version.")
 
     def _show_update_dialog(self):
         if not self._updater or not self._pending_update:
@@ -1702,6 +1789,8 @@ class MainWindow(QMainWindow):
             self._updater,
             self._restart,
             parent=self,
+            config=self.config,
+            quit_callback=self._quit_for_update,
         )
         dlg.exec()
 
@@ -1711,7 +1800,13 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Updates", "Updater not available.")
             return
         self.status_bar.showMessage("Checking for updates...", 5000)
-        self._updater.check_once_async()
+        self.start_update_check(manual=True)
+
+    def _quit_for_update(self):
+        """Close so the installer can replace the program files."""
+        self._on_disconnect()
+        from PyQt6.QtWidgets import QApplication
+        QApplication.instance().quit()
 
     def _restart(self):
         """Graceful restart: launch a new process and exit."""

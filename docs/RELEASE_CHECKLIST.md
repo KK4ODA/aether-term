@@ -75,7 +75,8 @@ Release title: `Aether Term X.Y.Z`
 
 Attach:
 
-☐ Installer (`Aether_Term_Setup_X.Y.Z.exe`) and portable zip
+☐ Installer (`Aether_Term_Setup_X.Y.Z.exe`) and portable zip. Keep the installer's file name:
+  the in-app updater looks for the `Aether_Term_Setup_*.exe` asset on the latest release.
 (`Aether_Term_Portable_X.Y.Z.zip`) from `build.bat` — the release workflow
 also attaches a portable zip automatically\
 ☐ Source code archive (optional)

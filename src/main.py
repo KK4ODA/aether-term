@@ -78,28 +78,6 @@ def main():
         from updater import Updater
         updater = Updater(config)
 
-        # Git installs: pull and restart before the GUI launches.
-        # Installed builds are checked in the background once the window is up.
-        if config.get("check_updates_on_startup", True) and updater.is_git:
-            try:
-                result = updater.check_for_updates()
-                if result.update_available:
-                    n = len(result.commits)
-                    log.info(f"Auto-update: {n} new commit(s) available")
-                    apply_result = updater.apply_update()
-                    if apply_result.success:
-                        log.info(
-                            f"Updated {apply_result.old_hash} -> "
-                            f"{apply_result.new_hash}, restarting..."
-                        )
-                        import subprocess as _sp
-                        _sp.Popen([sys.executable] + sys.argv)
-                        sys.exit(0)
-                    else:
-                        log.warning(f"Auto-update failed: {apply_result.error}")
-            except Exception as e:
-                log.warning(f"Auto-update check failed: {e}")
-
         # Load password store
         password_store = PasswordStore(config.app_data_dir)
 
@@ -107,10 +85,13 @@ def main():
         window = MainWindow(config, password_store)
         window.show()
 
-        # Updater for manual checks via Help menu, and the release check
+        # Check for a newer version in the background; if there is one the
+        # user is asked (git clone: pull and restart; installed build:
+        # download and run the new installer).  Help → Check for Updates
+        # runs the same check by hand.
         window.set_updater(updater)
-        if config.get("check_updates_on_startup", True) and not updater.is_git:
-            updater.check_once_async()
+        if config.get("check_updates_on_startup", True):
+            window.start_update_check()
 
         log.info("Aether Term GUI launched")
         sys.exit(app.exec())

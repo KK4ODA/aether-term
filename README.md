@@ -99,14 +99,19 @@ Details of the protocol mapping are in [`docs/AETHER_HF.md`](docs/AETHER_HF.md).
 
 ## Updates
 
-- **Git installs** (the one-line installer, or a clone) pull the latest `main` and restart on
-  startup.
-- **Installer and portable builds** check the latest
-  [GitHub release](https://github.com/KK4ODA/aether-term/releases) on startup. When there is a
-  newer one, **UPDATE vX.Y.Z** appears in the status bar and opens its download page.
+At startup Aether Term checks for a newer version in the background. If it finds one, it asks
+whether to update:
 
-Turn the startup check off with `check_updates_on_startup` in `settings.json`. **Help → Check for
-Updates** checks on demand.
+- **Installer builds** download the new `Aether_Term_Setup_X.Y.Z.exe` from the latest
+  [GitHub release](https://github.com/KK4ODA/aether-term/releases), check it against the SHA-256
+  digest GitHub publishes, then close and run it. The new version starts when setup finishes.
+  Settings and saved passwords are kept.
+- **Portable builds** open the release's download page.
+- **Git installs** (the one-line installer, or a clone) pull the latest `main` and restart.
+
+**Skip This Version** stops the startup prompt for that release. The status bar still shows
+**UPDATE vX.Y.Z**, and **Help → Check for Updates** still offers it. Aether Term never prompts
+during a session. Turn the startup check off under **Settings → Terminal Setup**.
 
 ## Building and testing
 
