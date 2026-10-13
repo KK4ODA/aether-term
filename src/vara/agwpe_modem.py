@@ -68,7 +68,9 @@ class AGWPEModem(QObject):
         ).start()
 
     def _do_connect(self, host: str, port: int):
-        self._set_state(ConnectionState.DISCONNECTED)
+        # No DISCONNECTED announcement here: the window reads DISCONNECTED as
+        # "the call failed", which cleared its connect-in-progress flag and
+        # let the idle-link cleanup race the RF connect.
         client = AGWPEClient(
             host=host, port=port, on_frame=self._on_frame,
         )
@@ -82,15 +84,20 @@ class AGWPEModem(QObject):
             self._set_state(ConnectionState.DISCONNECTED)
 
     def initialize_modem(self, callsign: str, is_hf: bool = False,
-                         bandwidth: int = 0):
+                         bandwidth: int = 0, query_version: bool = False):
         """Register callsign with the TNC.
 
-        *is_hf* and *bandwidth* are ignored for AGWPE.
+        Takes the same arguments as ``VARAModem.initialize_modem``;
+        *is_hf*, *bandwidth* and *query_version* mean nothing to AGWPE.
+        Like the VARA modem it reports INITIALIZING, then MODEM_CONNECTED
+        when done — the main window sends the RF connect on that.
         """
+        self._set_state(ConnectionState.INITIALIZING)
         self._my_call = callsign.upper()
         if self._client:
             self._client.register_callsign(self._my_call)
             self.command_event.emit(f"Registered callsign {self._my_call}")
+        self._set_state(ConnectionState.MODEM_CONNECTED)
 
     def rf_connect(self, my_call: str, target: str,
                    via1: str = "", via2: str = ""):

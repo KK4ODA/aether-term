@@ -5,6 +5,41 @@ Format: [version] — YYYY-MM-DD, then a bulleted list of changes.
 
 ---
 
+## [1.1.4] — 2026-10-13
+
+### Changed
+
+- **Via 1 / Via 2 are dropdowns that remember.** Both boxes offer **None**
+  plus the digipeaters you have used before, most recent first, up to 10. You
+  can still type a new one. Each call's choice, None included, is saved and
+  comes back the next time Aether Term starts, so a digipeated route is not
+  lost to an empty box. Picking a profile still fills both boxes.
+  *(gui/main_window.py, config.py)*
+
+### Fixed
+
+- **Soundmodem (AGWPE) connects no longer close the app.** Since 1.1.0 the
+  window called the modem's initialization with an argument the Soundmodem
+  driver didn't accept, and the error inside a Qt event handler made PyQt6
+  abort the program the moment the TNC link came up. The driver now takes the
+  same arguments as the VARA one and reports its states, so the AX.25 connect
+  actually goes out. *(vara/agwpe_modem.py, gui/main_window.py)*
+- **AGWPE frames match the spec.** The frame header was packed as 40 bytes
+  instead of the AGWPE protocol's 36, which shifted the callsigns, the data
+  length and the data by 4 bytes, so Soundmodem could not have understood
+  any frame. *(vara/agwpe.py)*
+- **Switching modes no longer kills the next call.** When Connect replaced
+  the modem (for example VARA FM → Soundmodem), the old modem's final
+  "disconnected" reached the window after the new call had started, and the
+  idle-link cleanup closed the new link. The old modem is now silenced before
+  it is closed, and the Soundmodem driver no longer announces "disconnected"
+  at the start of a connect. PTT messages are also no longer doubled after a
+  mode switch. *(gui/main_window.py, vara/agwpe_modem.py)*
+- **Unexpected errors are logged instead of closing the app.** An error
+  inside a Qt event handler is written to the log with its traceback and
+  shown in a dialog, and Aether Term keeps running. Errors in background
+  threads are logged too. *(main.py)*
+
 ## [1.1.3] — 2026-10-13
 
 ### Fixed

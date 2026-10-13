@@ -41,6 +41,20 @@ from gui.profile_dialog import ProfileDialog
 
 log = logging.getLogger(__name__)
 
+# Signals the window connects on a modem (VARA or AGWPE); disconnected
+# when a modem is swapped out.
+_MODEM_SIGNALS = (
+    "state_changed", "data_received", "command_event", "sn_report",
+    "error_signal", "modem_connected", "rf_connected", "rf_disconnected",
+    "pending_signal", "busy_signal", "ptt_event",
+    "bitrate_report", "session_bandwidth", "version_report",
+)
+
+# Via 1 / Via 2 dropdowns: the "no digipeater" entry, and how many
+# digipeaters they remember.
+VIA_NONE = "None"
+MAX_VIA_HISTORY = 10
+
 # How long the BBS must be quiet before an unfinished line (a prompt
 # without a line end) is shown.  VARA hands data over a frame at a time,
 # often mid-line, a second or more apart on a slow link.
@@ -242,22 +256,21 @@ class MainWindow(QMainWindow):
             self.target_input.setCurrentText("")
         row1.addWidget(self.target_input, stretch=1)
 
+        # Via 1 / Via 2: "None" or a digipeater used before (or type a new
+        # one); the last call's choice comes back next time.
         row1.addWidget(QLabel("Via 1:"))
-        self.via1_input = QLineEdit()
-        self.via1_input.setPlaceholderText("(optional)")
-        self.via1_input.setMaximumWidth(120)
-        self.via1_input.setToolTip(
+        self.via1_input = self._make_via_combo(
             "First digipeater in the path (VARA FM only).\n"
-            "Leave blank for direct connection.\n"
-            "Connecting via digipeaters needs a registered VARA license."
-        )
+            "None for a direct connection.\n"
+            "Connecting via digipeaters needs a registered VARA license.",
+            self.config.get("last_via1", ""))
         row1.addWidget(self.via1_input)
 
         row1.addWidget(QLabel("Via 2:"))
-        self.via2_input = QLineEdit()
-        self.via2_input.setPlaceholderText("(optional)")
-        self.via2_input.setMaximumWidth(120)
-        self.via2_input.setToolTip("Second digipeater in the path (VARA FM only).\nOnly needed for two-hop routes.")
+        self.via2_input = self._make_via_combo(
+            "Second digipeater in the path (VARA FM only).\n"
+            "Only needed for two-hop routes.",
+            self.config.get("last_via2", ""))
         row1.addWidget(self.via2_input)
 
         self.connect_btn = QPushButton("  Connect  ")
@@ -470,11 +483,14 @@ class MainWindow(QMainWindow):
         # HF PTT: modem emits ptt_event → PTT controller keys/unkeys radio
         self.modem.ptt_event.connect(self.ptt.on_ptt_event,
                                       Qt.ConnectionType.QueuedConnection)
-        self.ptt.ptt_changed.connect(self._on_ptt_changed,
-                                      Qt.ConnectionType.QueuedConnection)
-        self.ptt.ptt_error.connect(
-            lambda msg: self.terminal.display.append_warning(f"[PTT] {msg}"),
-            Qt.ConnectionType.QueuedConnection)
+        # The PTT controller outlives modem swaps: wire it once
+        if not getattr(self, "_ptt_wired", False):
+            self._ptt_wired = True
+            self.ptt.ptt_changed.connect(self._on_ptt_changed,
+                                          Qt.ConnectionType.QueuedConnection)
+            self.ptt.ptt_error.connect(
+                lambda msg: self.terminal.display.append_warning(f"[PTT] {msg}"),
+                Qt.ConnectionType.QueuedConnection)
 
     # ── Actions ────────────────────────────────────────────────────
 
@@ -526,8 +542,8 @@ class MainWindow(QMainWindow):
         and the Soundmodem path would otherwise silently call direct.
         """
         try:
-            digis = parse_digipeaters(self.via1_input.text(),
-                                      self.via2_input.text())
+            digis = parse_digipeaters(self._via_value(self.via1_input),
+                                      self._via_value(self.via2_input))
         except ValueError as e:
             QMessageBox.warning(self, "Digipeater Path", str(e))
             self.via1_input.setFocus()
@@ -549,8 +565,10 @@ class MainWindow(QMainWindow):
 
         # Store target and digipeater path for later use
         self._target = target
-        self._via = parse_digipeaters(self.via1_input.text(),
-                                      self.via2_input.text())
+        via1 = self._via_value(self.via1_input)
+        via2 = self._via_value(self.via2_input)
+        self._via = parse_digipeaters(via1, via2)
+        self._remember_via(via1, via2)
         path = f" via {', '.join(self._via)}" if self._via else ""
         self.terminal.display.append_system(
             f"Connecting to {target}{path} as {callsign} using {mode}...")
@@ -609,16 +627,17 @@ class MainWindow(QMainWindow):
         self.modem_status_label.setText("Modem: Connected")
         self.modem_status_label.setStyleSheet(f"color: {C['success']};")
 
+        # RF CONNECT is sent when init completes (state → MODEM_CONNECTED).
+        # A one-shot connection avoids the old fixed-timer race where
+        # CONNECT fired before BW was sent on HF.  Listen *before* starting
+        # init, so a modem that finishes at once (Soundmodem) is not missed.
+        self.modem.state_changed.connect(
+            self._on_init_complete, Qt.ConnectionType.QueuedConnection)
+
         callsign = self._effective_callsign()
         self.modem.initialize_modem(
             callsign, self.config.is_hf_band, self.config.session_bandwidth,
             query_version=self.config.is_aether)
-
-        # RF CONNECT is sent when init completes (state → MODEM_CONNECTED).
-        # A one-shot connection avoids the old fixed-timer race where
-        # CONNECT fired before BW was sent on HF.
-        self.modem.state_changed.connect(
-            self._on_init_complete, Qt.ConnectionType.QueuedConnection)
 
     @pyqtSlot(object)
     def _on_init_complete(self, new_state):
@@ -1059,9 +1078,8 @@ class MainWindow(QMainWindow):
         elif upper == "BUSY":
             pass
         elif upper == "WRONG":
-            cmd_hint = ""
-            if self.modem._last_cmd:
-                cmd_hint = f" (cmd: {self.modem._last_cmd})"
+            last_cmd = getattr(self.modem, "_last_cmd", None)
+            cmd_hint = f" (cmd: {last_cmd})" if last_cmd else ""
             self.terminal.display.append_warning(
                 f"[MODEM] Command rejected: WRONG{cmd_hint}")
         elif upper == "CANCELPENDING":
@@ -1221,8 +1239,8 @@ class MainWindow(QMainWindow):
             self._active_profile = p
             self._update_title()
             self.target_input.setCurrentText(p.get("target_callsign", ""))
-            self.via1_input.setText(p.get("via1", ""))
-            self.via2_input.setText(p.get("via2", ""))
+            self._set_via(self.via1_input, p.get("via1", ""))
+            self._set_via(self.via2_input, p.get("via2", ""))
 
             mode = p.get("mode", "VARA FM")
             if mode != self.config.get("vara_mode"):
@@ -1279,6 +1297,60 @@ class MainWindow(QMainWindow):
                 self._session_log_file = None
 
     # ── Target history ────────────────────────────────────────────
+
+    # ── Via (digipeater) dropdowns ─────────────────────────────────
+
+    def _make_via_combo(self, tooltip: str, current: str) -> QComboBox:
+        cb = QComboBox()
+        cb.setEditable(True)
+        cb.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        cb.setMaximumWidth(130)
+        cb.setToolTip(tooltip)
+        self._fill_via_combo(cb)
+        self._set_via(cb, current)
+        return cb
+
+    def _fill_via_combo(self, cb: QComboBox):
+        cb.clear()
+        cb.addItem(VIA_NONE)
+        for call in self.config.get("via_history", []):
+            if call and isinstance(call, str):
+                cb.addItem(call.upper().strip())
+
+    @staticmethod
+    def _via_value(cb: QComboBox) -> str:
+        """The digipeater in a Via box, "" for None."""
+        text = cb.currentText().strip().upper()
+        return "" if text in ("", VIA_NONE.upper()) else text
+
+    @staticmethod
+    def _set_via(cb: QComboBox, value: str):
+        value = (value or "").strip().upper()
+        if not value:
+            cb.setCurrentIndex(0)           # None
+        else:
+            i = cb.findText(value)
+            if i >= 0:
+                cb.setCurrentIndex(i)
+            else:
+                cb.setCurrentText(value)
+
+    def _remember_via(self, via1: str, via2: str):
+        """Keep this call's Via choices (None too) and add new digipeaters
+        to both dropdowns, most recent first."""
+        history = list(self.config.get("via_history", []))
+        for call in (via2, via1):           # via1 ends up first
+            if call:
+                if call in history:
+                    history.remove(call)
+                history.insert(0, call)
+        self.config.set("via_history", history[:MAX_VIA_HISTORY])
+        self.config.set("last_via1", via1)
+        self.config.set("last_via2", via2)
+        self.config.save()
+        for cb, value in ((self.via1_input, via1), (self.via2_input, via2)):
+            self._fill_via_combo(cb)
+            self._set_via(cb, value)
 
     def _add_to_target_history(self, callsign: str):
         """Add a callsign to the target dropdown history."""
@@ -1529,8 +1601,8 @@ class MainWindow(QMainWindow):
         self._active_profile = profile
         self._update_title()
         self.target_input.setCurrentText(profile.get("target_callsign", ""))
-        self.via1_input.setText(profile.get("via1", ""))
-        self.via2_input.setText(profile.get("via2", ""))
+        self._set_via(self.via1_input, profile.get("via1", ""))
+        self._set_via(self.via2_input, profile.get("via2", ""))
         mode = profile.get("mode", "VARA FM")
         self.config.set("vara_mode", mode)
         self._apply_profile_bandwidth(profile)
@@ -1748,7 +1820,7 @@ class MainWindow(QMainWindow):
         from vara.agwpe_modem import AGWPEModem
         if isinstance(self.modem, AGWPEModem):
             return
-        self.modem.disconnect_from_modem()
+        self._retire_modem()
         self.modem = AGWPEModem()
         self._connect_signals()
 
@@ -1756,9 +1828,27 @@ class MainWindow(QMainWindow):
         """Replace the current modem with a VARAModem if not already."""
         if isinstance(self.modem, VARAModem):
             return
-        self.modem.disconnect_from_modem()
+        self._retire_modem()
         self.modem = VARAModem()
         self._connect_signals()
+
+    def _retire_modem(self):
+        """Close the modem being replaced, without its signals reaching us.
+
+        Its last "disconnected" would otherwise arrive after the new modem
+        has started a call, clear the connect-in-progress flag, and let the
+        cleanup close the new link (switching to Soundmodem and pressing
+        Connect did exactly that).
+        """
+        old = self.modem
+        for name in _MODEM_SIGNALS:
+            sig = getattr(old, name, None)
+            if sig is not None:
+                try:
+                    sig.disconnect()
+                except TypeError:
+                    pass                    # nothing connected
+        old.disconnect_from_modem()
 
     # ── Transport detection ──────────────────────────────────────────
 

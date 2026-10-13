@@ -102,8 +102,8 @@ def test_vara_fm_digipeater_session(qapp, win):
     cfg.set("vara_fm_cmd_port", win.fake.cmd_port)
     cfg.set("vara_fm_data_port", win.fake.data_port)
     assert cfg.cmd_port == win.fake.cmd_port
-    win.via1_input.setText("n4xyz-7")
-    win.via2_input.setText("K4ABC-1")
+    win._set_via(win.via1_input, "n4xyz-7")
+    win._set_via(win.via2_input, "K4ABC-1")
     win._on_connect()
     assert pump(qapp, until=lambda: "CONNECTED to W1AW-5 via" in text(win), timeout=15)
     assert "CONNECT KK4ODA W1AW-5 VIA N4XYZ-7 K4ABC-1" in win.fake.commands
@@ -120,7 +120,7 @@ def test_bad_digipeater_path_stops_the_call(qapp, win, monkeypatch, via1, expect
     shown = []
     monkeypatch.setattr(main_window.QMessageBox, "warning",
                         lambda *a, **k: shown.append(a[2]))
-    win.via1_input.setText(via1)
+    win._set_via(win.via1_input, via1)
     win._on_connect()
     pump(qapp, 0.5)
     assert shown and expected in shown[0]
@@ -222,6 +222,105 @@ def test_protocol_lines_are_never_shown_half_way(qapp, win):
     assert ";TRANSPORT" not in text(win)
     win._on_data_received("RA FM\r\n")
     assert "BBS transport: VARA FM" in text(win)
+
+
+def _reopen(qapp, win):
+    """A second window on the same settings — what the next start sees."""
+    from passwords import PasswordStore
+    from gui.main_window import MainWindow
+    w2 = MainWindow(win.config, PasswordStore(win.config.app_data_dir))
+    return w2
+
+
+def test_via_dropdowns_offer_none_first(qapp, win):
+    for cb in (win.via1_input, win.via2_input):
+        assert cb.itemText(0) == "None"
+        assert cb.currentText() == "None"
+        assert win._via_value(cb) == ""
+
+
+def test_via_choice_and_history_are_remembered(qapp, win):
+    """The last call's digipeaters come back next start, and stay in the
+    dropdowns after None is chosen."""
+    win._set_via(win.via1_input, "wd5ema-4")
+    win._set_via(win.via2_input, "")
+    win._remember_via("WD5EMA-4", "")
+    w2 = _reopen(qapp, win)
+    try:
+        assert w2.via1_input.currentText() == "WD5EMA-4"
+        assert w2.via2_input.currentText() == "None"
+        assert [w2.via1_input.itemText(i) for i in range(w2.via1_input.count())] \
+            == ["None", "WD5EMA-4"]
+        assert w2.via2_input.findText("WD5EMA-4") >= 0     # offered in both boxes
+    finally:
+        w2.close()
+    # A direct call (None) is remembered too, and the digipeater stays listed
+    win._remember_via("", "")
+    w3 = _reopen(qapp, win)
+    try:
+        assert w3.via1_input.currentText() == "None"
+        assert w3.via1_input.findText("WD5EMA-4") >= 0
+    finally:
+        w3.close()
+
+
+def test_connect_records_the_via_choice(qapp, win):
+    """A real call saves what was chosen — here None, on the Aether HF path."""
+    win.config.set("last_via1", "WD5EMA-4")
+    win._set_via(win.via1_input, "")
+    win._on_connect()
+    assert pump(qapp, until=lambda: "CONNECTED to W1AW-5" in text(win), timeout=15)
+    assert win.config.get("last_via1") == ""
+
+
+def test_via_history_is_capped_and_most_recent_first(qapp, win):
+    from gui.main_window import MAX_VIA_HISTORY
+    for i in range(MAX_VIA_HISTORY + 3):
+        win._remember_via(f"DIGI{i}-1", "")
+    hist = win.config.get("via_history")
+    assert len(hist) == MAX_VIA_HISTORY
+    assert hist[0] == f"DIGI{MAX_VIA_HISTORY + 2}-1"
+
+
+@pytest.fixture
+def agwpe():
+    from fake_agwpe import FakeAGWPE
+    fake = FakeAGWPE().start()
+    yield fake
+    fake.stop()
+
+
+def test_soundmodem_session(qapp, win, agwpe):
+    """Soundmodem (AGWPE): connect, talk, disconnect — without the window
+    crashing (1.1.0–1.1.4 aborted when the TNC link came up) and without the
+    call stalling before the AX.25 connect went out."""
+    from vara.agwpe_modem import AGWPEModem
+    from vara.connection import ConnectionState
+    win.mode_combo.setCurrentIndex(3)
+    pump(qapp, 0.1)
+    assert win.config.mode == "AGWPE"
+    win.config.set("soundmodem_port", agwpe.port)
+    win._on_connect()
+    ok = pump(qapp, until=lambda: "CONNECTED to W1AW-5" in text(win), timeout=15)
+    assert ok, f"frames={agwpe.kinds()!r}\n" + text(win)[-700:]
+    assert isinstance(win.modem, AGWPEModem)
+    assert agwpe.kinds().startswith("XC")          # registered, then connected
+    win._send_text("H")
+    assert pump(qapp, until=lambda: "Help: BBS CHAT NODES BYE" in text(win))
+    assert agwpe.data_sent() == b"H\r"
+    win._on_disconnect()
+    assert pump(qapp, until=lambda: win.modem.state == ConnectionState.DISCONNECTED)
+
+
+def test_agwpe_modem_takes_the_vara_init_arguments(qapp):
+    """The main window calls initialize_modem the same way for every modem."""
+    from vara.agwpe_modem import AGWPEModem
+    from vara.connection import ConnectionState
+    m = AGWPEModem()
+    states = []
+    m.state_changed.connect(states.append)
+    m.initialize_modem("KK4ODA", False, 2300, query_version=False)
+    assert states == [ConnectionState.INITIALIZING, ConnectionState.MODEM_CONNECTED]
 
 
 def test_wrong_modem_on_port_is_reported(qapp, win):

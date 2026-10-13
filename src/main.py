@@ -48,8 +48,52 @@ def setup_logging():
     return logging.getLogger("aetherterm")
 
 
+def install_error_handler(log):
+    """Log unexpected errors and show them, instead of exiting.
+
+    With Python's default excepthook, PyQt6 aborts the whole program when
+    an exception escapes a Qt slot — the window just vanishes.  This hook
+    writes the traceback to the log and shows a dialog; the app carries on.
+    Errors in background threads are logged too.
+    """
+    import threading
+    log_file = Path.home() / "Aether Term" / "logs" / "aether-term.log"
+    showing = []
+
+    def hook(exc_type, exc, tb):
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc, tb)
+            return
+        log.critical("Unexpected error", exc_info=(exc_type, exc, tb))
+        if showing:                      # one dialog at a time
+            return
+        try:
+            from PyQt6.QtWidgets import QApplication, QMessageBox
+            if QApplication.instance() is None:
+                return
+            showing.append(True)
+            QMessageBox.critical(
+                None, "Aether Term — unexpected error",
+                f"{exc_type.__name__}: {exc}\n\n"
+                f"The details were written to the log:\n{log_file}\n\n"
+                "Aether Term keeps running; restart it if something "
+                "does not work as it should.")
+        except Exception:
+            pass
+        finally:
+            showing.clear()
+
+    def thread_hook(args):
+        log.critical(f"Unexpected error in thread {args.thread.name if args.thread else '?'}",
+                     exc_info=(args.exc_type, args.exc_value, args.exc_traceback))
+
+    sys.excepthook = hook
+    threading.excepthook = thread_hook
+
+
 def main():
     log = setup_logging()
+    install_error_handler(log)
     log.info("=" * 60)
     log.info("Aether Term starting")
     log.info("=" * 60)
