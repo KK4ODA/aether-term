@@ -883,6 +883,21 @@ class MainWindow(QMainWindow):
         if state in (ConnectionState.CONNECTED,
                      ConnectionState.DISCONNECTED):
             self._connect_in_progress = False
+        # Falling back to MODEM_CONNECTED from a call (refused, timed out,
+        # CANCELPENDING, rejected CONNECT, or a session that ended) is the
+        # end of that connect sequence too — unlike the INITIALIZING →
+        # MODEM_CONNECTED step that precedes the CONNECT.
+        prev = getattr(self, "_prev_state", None)
+        self._prev_state = state
+        if (state == ConnectionState.MODEM_CONNECTED
+                and prev in (ConnectionState.CONNECTING,
+                             ConnectionState.CONNECTED,
+                             ConnectionState.DISCONNECTING)):
+            if prev == ConnectionState.CONNECTING and self._connect_in_progress:
+                self.terminal.display.append_warning(
+                    f"Connection to {getattr(self, '_target', '')} failed "
+                    "— closing the modem link.")
+            self._connect_in_progress = False
 
         # If we've fallen back to MODEM_CONNECTED and we're NOT in a
         # connect sequence, it means the RF session ended (DISCONNECTED
@@ -1720,14 +1735,50 @@ class MainWindow(QMainWindow):
     def set_updater(self, updater):
         """Called by main.py after construction to wire the updater."""
         self._updater = updater
+        self._manual_update_check = False
         self._updater.update_available.connect(
             self._on_update_available, Qt.ConnectionType.QueuedConnection,
         )
+        self._updater.check_finished.connect(
+            self._on_update_check_finished, Qt.ConnectionType.QueuedConnection,
+        )
+
+    def start_update_check(self, manual: bool = False):
+        """Check for a newer version in the background.
+
+        At startup (manual=False) a found update is offered in a dialog
+        unless the user skipped that version; a manual check also reports
+        "up to date" and errors.
+        """
+        if not self._updater:
+            return
+        self._manual_update_check = manual
+        self._updater.check_once_async()
 
     def _on_update_available(self, check_result):
         self._pending_update = check_result
         self._update_label.setText(check_result.label)
         self._update_label.show()
+
+    def _on_update_check_finished(self, result):
+        manual = self._manual_update_check
+        self._manual_update_check = False
+        if result.update_available:
+            skipped = self.config.get("skipped_update_version", "")
+            if manual:
+                self._show_update_dialog()
+            elif (result.version_key != skipped
+                  and self.modem.state == ConnectionState.DISCONNECTED):
+                # Don't interrupt a session; the status-bar label stays
+                self._show_update_dialog()
+        elif manual:
+            if result.error:
+                QMessageBox.warning(self, "Software Update",
+                                    f"Could not check for updates:\n{result.error}")
+            else:
+                QMessageBox.information(
+                    self, "Software Update",
+                    f"Aether Term {APP_VERSION} is the latest version.")
 
     def _show_update_dialog(self):
         if not self._updater or not self._pending_update:
@@ -1738,6 +1789,8 @@ class MainWindow(QMainWindow):
             self._updater,
             self._restart,
             parent=self,
+            config=self.config,
+            quit_callback=self._quit_for_update,
         )
         dlg.exec()
 
@@ -1747,7 +1800,13 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Updates", "Updater not available.")
             return
         self.status_bar.showMessage("Checking for updates...", 5000)
-        self._updater.check_once_async()
+        self.start_update_check(manual=True)
+
+    def _quit_for_update(self):
+        """Close so the installer can replace the program files."""
+        self._on_disconnect()
+        from PyQt6.QtWidgets import QApplication
+        QApplication.instance().quit()
 
     def _restart(self):
         """Graceful restart: launch a new process and exit."""

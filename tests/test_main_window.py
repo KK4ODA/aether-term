@@ -139,6 +139,60 @@ def test_refused_call_is_explained(qapp, win):
     assert pump(qapp, until=lambda: "No session with W1AW-5" in text(win), timeout=15)
 
 
+def test_failed_call_closes_the_modem_link(qapp, win):
+    """A refused call ends on its own — no Disconnect click needed."""
+    from vara.connection import ConnectionState
+    win.fake.state["answer_connect"] = False
+    win._on_connect()
+    assert pump(qapp, until=lambda: "Connection to W1AW-5 failed" in text(win),
+                timeout=15)
+    assert pump(qapp, until=lambda: win.modem.state == ConnectionState.DISCONNECTED)
+    pump(qapp, 0.2)
+    assert win.connect_btn.isEnabled() and not win.disconnect_btn.isEnabled()
+
+
+def test_rejected_connect_command_closes_the_modem_link(qapp, win):
+    from vara.connection import ConnectionState
+    win.fake.state["reject_connect"] = True
+    win._on_connect()
+    assert pump(qapp, until=lambda: "Command rejected: WRONG" in text(win), timeout=15)
+    assert pump(qapp, until=lambda: win.modem.state == ConnectionState.DISCONNECTED)
+    pump(qapp, 0.2)
+    assert win.connect_btn.isEnabled()
+
+
+def test_session_end_still_closes_the_modem_link(qapp, win):
+    from vara.connection import ConnectionState
+    win._on_connect()
+    assert pump(qapp, until=lambda: "CONNECTED to W1AW-5" in text(win), timeout=15)
+    win._on_disconnect()
+    assert pump(qapp, until=lambda: win.modem.state == ConnectionState.DISCONNECTED)
+    assert "failed" not in text(win)
+
+
+@pytest.mark.parametrize("manual,skipped,connected,prompted", [
+    (False, "", False, True),           # startup: ask
+    (False, "v1.2.0", False, False),    # startup: user skipped this version
+    (True, "v1.2.0", False, True),      # Help → Check for Updates: always ask
+    (False, "", True, False),           # never interrupt a session
+])
+def test_startup_update_prompt(qapp, win, monkeypatch, manual, skipped, connected, prompted):
+    from updater import UpdateCheckResult
+    from vara.connection import ConnectionState
+    shown = []
+    monkeypatch.setattr(win, "_show_update_dialog", lambda: shown.append(1))
+    win.config.set("skipped_update_version", skipped)
+    if connected:
+        monkeypatch.setattr(type(win.modem), "state",
+                            property(lambda self: ConnectionState.CONNECTED))
+    r = UpdateCheckResult(update_available=True, mode="release", release_tag="v1.2.0")
+    win._manual_update_check = manual
+    win._on_update_available(r)
+    win._on_update_check_finished(r)
+    assert bool(shown) == prompted
+    assert win._update_label.text() == "UPDATE v1.2.0"
+
+
 def test_mode_switching(qapp, win):
     cfg = win.config
     for idx, mode in [(1, "VARA HF"), (3, "AGWPE"), (0, "VARA FM"), (2, "Aether HF")]:

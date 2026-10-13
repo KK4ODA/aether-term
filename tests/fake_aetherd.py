@@ -54,6 +54,7 @@ class FakeAetherd:
             "state": "idle",
             "remote": None,
             "answer_connect": True,      # False: refuse with DISCONNECTED
+            "reject_connect": False,     # True: answer CONNECT with WRONG
             "version_reply": f"VERSION Aether HF {VERSION}",
             "status_delay": 0.0,         # seconds before /v1/status answers
         }
@@ -188,6 +189,8 @@ class FakeAetherd:
         up = line.upper()
         if up == "VERSION":
             c.sendall(self.state["version_reply"].encode() + b"\r")
+        elif up.startswith("CONNECT ") and self.state["reject_connect"]:
+            c.sendall(b"WRONG\r")
         elif up.startswith("CONNECT "):
             c.sendall(b"OK\r")
             parts = line.split()

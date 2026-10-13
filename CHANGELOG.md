@@ -7,7 +7,27 @@ Format: [version] — YYYY-MM-DD, then a bulleted list of changes.
 
 ## [Unreleased]
 
+### Added
+
+- **Update prompt at startup.** When a newer version is out, Aether Term asks
+  whether to update. Installed builds download the release's setup program,
+  verify its size and the SHA-256 digest GitHub publishes, then close and run
+  it silently. The installer then starts the new version. Portable builds open
+  the download page. Git installs pull and restart, and no longer do so
+  silently before the window opens. **Skip This Version** stops the startup
+  prompt for that release. The prompt never interrupts a session. There is a
+  new Settings → Terminal Setup option to turn the startup check off, and
+  Help → Check for Updates now says when you are already up to date.
+  *(updater.py, gui/update_dialog.py, gui/main_window.py, main.py,
+  installer.iss)*
+
 ### Fixed
+
+- **Failed calls close the modem link on their own.** A call that was refused,
+  timed out, cancelled (`CANCELPENDING`) or rejected with `WRONG` used to leave
+  the app connected to the modem, so Disconnect had to be pressed. The attempt
+  now ends with "Connection to X failed — closing the modem link." and the
+  window is ready for the next call. *(gui/main_window.py, vara/modem.py)*
 
 - **VARA FM digipeater connects.** Commands to the VARA modem now end in a
   bare CR, as the VARA TNC command reference specifies, instead of CR LF. The

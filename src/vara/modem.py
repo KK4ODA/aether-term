@@ -435,6 +435,11 @@ class VARAModem(QObject):
         elif upper == "WRONG":
             cmd_hint = f" (cmd: {self._last_cmd})" if self._last_cmd else ""
             log.warning(f"Modem rejected command with WRONG{cmd_hint}")
+            # A rejected CONNECT never gets a DISCONNECTED — end the
+            # attempt here so the app does not sit in CONNECTING.
+            if (self._state == ConnectionState.CONNECTING
+                    and (self._last_cmd or "").upper().startswith("CONNECT")):
+                self._set_state(ConnectionState.MODEM_CONNECTED)
 
         elif upper == "OK":
             log.debug("Modem acknowledged command OK")

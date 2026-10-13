@@ -184,6 +184,11 @@ class SettingsDialog(QDialog):
         conn_form.addRow(self.session_logging_cb)
         self.show_ptt_cb = QCheckBox("Show PTT ON/OFF events in terminal")
         conn_form.addRow(self.show_ptt_cb)
+        self.check_updates_cb = QCheckBox("Check for updates at startup")
+        self.check_updates_cb.setToolTip(
+            "Look for a newer Aether Term when the program starts and offer\n"
+            "to install it. Help → Check for Updates works either way.")
+        conn_form.addRow(self.check_updates_cb)
         layout.addWidget(conn_group)
 
         layout.addStretch()
@@ -570,6 +575,7 @@ class SettingsDialog(QDialog):
         self.max_retries_spin.setValue(c.get("max_retries", 5))
         self.session_logging_cb.setChecked(c.get("session_logging", True))
         self.show_ptt_cb.setChecked(c.get("show_ptt_events", False))
+        self.check_updates_cb.setChecked(c.get("check_updates_on_startup", True))
 
         # Modem tab
         self.fm_host.setText(c.get("vara_fm_host", "127.0.0.1"))
@@ -638,6 +644,7 @@ class SettingsDialog(QDialog):
         c.set("max_retries", self.max_retries_spin.value())
         c.set("session_logging", self.session_logging_cb.isChecked())
         c.set("show_ptt_events", self.show_ptt_cb.isChecked())
+        c.set("check_updates_on_startup", self.check_updates_cb.isChecked())
 
         c.set("vara_fm_host", self.fm_host.text())
         c.set("vara_fm_cmd_port", self.fm_cmd_port.value())

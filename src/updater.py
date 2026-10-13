@@ -7,20 +7,26 @@ Two modes, picked by how Aether Term is installed:
   compares HEAD with the remote tracking branch, and pulls + restarts.
 * **release** (the installer or the portable zip — no ``.git``): asks the
   GitHub Releases API for the latest release and, when it is newer than the
-  running version, offers its download page.
+  running version, offers it.  An installed build can download the release's
+  setup program, check it against the digest GitHub publishes, and run it;
+  a portable build is pointed at the download page.
 """
 
+import hashlib
 import json
 import logging
+import os
 import re
 import ssl
 import subprocess
+import sys
+import tempfile
 import threading
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
@@ -31,6 +37,23 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 GITHUB_REPO = "KK4ODA/aether-term"
 RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 RELEASES_PAGE = f"https://github.com/{GITHUB_REPO}/releases/latest"
+
+# The Inno Setup program attached to each release (installer.iss)
+_INSTALLER_ASSET_RE = re.compile(r"^Aether_Term_Setup_.*\.exe$", re.IGNORECASE)
+
+# Arguments for an unattended upgrade: progress window only, no questions;
+# the installer's [Run] entry starts the new version when it is done.
+INSTALLER_ARGS = ["/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART"]
+
+
+def is_installed_build() -> bool:
+    """True when running from the installer's copy (not a clone or portable zip).
+
+    Inno Setup leaves its uninstaller next to the executable.
+    """
+    if not getattr(sys, "frozen", False):
+        return False
+    return (Path(sys.executable).resolve().parent / "unins000.exe").exists()
 
 
 def parse_version(text: str) -> tuple:
@@ -79,6 +102,15 @@ class UpdateCheckResult:
     release_name: str = ""
     release_notes: str = ""
     release_url: str = ""
+    installer_url: str = ""      # the setup program attached to the release
+    installer_name: str = ""
+    installer_size: int = 0
+    installer_sha256: str = ""   # from GitHub's asset digest, when published
+
+    @property
+    def version_key(self) -> str:
+        """What "Skip this version" remembers."""
+        return self.release_tag if self.mode == "release" else self.remote_hash
 
     @property
     def label(self) -> str:
@@ -110,6 +142,7 @@ class Updater(QObject):
 
     update_available = pyqtSignal(object)   # UpdateCheckResult
     update_failed = pyqtSignal(str)         # error message
+    check_finished = pyqtSignal(object)     # UpdateCheckResult, after every check
 
     def __init__(self, config, repo_dir: Optional[Path] = None, parent=None,
                  current_version: Optional[str] = None,
@@ -192,8 +225,11 @@ class Updater(QObject):
 
     def check_for_updates(self) -> UpdateCheckResult:
         """Check for a newer version, by git or by GitHub release."""
-        if not self.is_git:
-            return self._check_release()
+        result = self._check_release() if not self.is_git else self._check_git()
+        self.check_finished.emit(result)
+        return result
+
+    def _check_git(self) -> UpdateCheckResult:
 
         result = UpdateCheckResult()
         branch = self._config.get("update_branch", "main")
@@ -244,6 +280,16 @@ class Updater(QObject):
             result.release_name = str(rel.get("name") or tag)
             result.release_notes = str(rel.get("body") or "")
             result.release_url = str(rel.get("html_url") or RELEASES_PAGE)
+            for asset in rel.get("assets") or []:
+                name = str(asset.get("name") or "")
+                if _INSTALLER_ASSET_RE.match(name):
+                    result.installer_name = name
+                    result.installer_url = str(asset.get("browser_download_url") or "")
+                    result.installer_size = int(asset.get("size") or 0)
+                    digest = str(asset.get("digest") or "")
+                    if digest.lower().startswith("sha256:"):
+                        result.installer_sha256 = digest[7:].lower()
+                    break
             if is_newer(tag, self._current_version):
                 result.update_available = True
                 self.update_available.emit(result)
@@ -309,6 +355,61 @@ class Updater(QObject):
             log.error("Update error", exc_info=True)
 
         return result
+
+    # ── release install ─────────────────────────────────────────────────
+
+    def download_installer(self, result: UpdateCheckResult,
+                           progress: Optional[Callable[[int, int], None]] = None,
+                           dest_dir: Optional[Path] = None) -> Path:
+        """Download the release's setup program; returns its path.
+
+        Checks the size and, when GitHub published one, the SHA-256 digest.
+        Raises RuntimeError with an operator-facing message on any failure.
+        """
+        if not result.installer_url:
+            raise RuntimeError("This release has no installer to download.")
+        dest_dir = Path(dest_dir or tempfile.mkdtemp(prefix="aether-term-update-"))
+        dest = dest_dir / (result.installer_name or "Aether_Term_Setup.exe")
+        req = urllib.request.Request(result.installer_url, headers={
+            "User-Agent": "AetherTerm-Updater"})
+        sha = hashlib.sha256()
+        done = 0
+        try:
+            with urllib.request.urlopen(req, timeout=30,
+                                        context=_ssl_context()) as resp, \
+                    open(dest, "wb") as f:
+                total = int(resp.headers.get("Content-Length") or
+                            result.installer_size or 0)
+                while True:
+                    chunk = resp.read(64 * 1024)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    sha.update(chunk)
+                    done += len(chunk)
+                    if progress:
+                        progress(done, total)
+        except Exception as e:
+            raise RuntimeError(f"Download failed: {e}") from e
+        if result.installer_size and done != result.installer_size:
+            raise RuntimeError(
+                f"Download incomplete ({done} of {result.installer_size} bytes).")
+        if result.installer_sha256 and sha.hexdigest() != result.installer_sha256:
+            dest.unlink(missing_ok=True)
+            raise RuntimeError("The downloaded installer failed its checksum "
+                               "— not running it.")
+        log.info("Downloaded %s (%d bytes)", dest, done)
+        return dest
+
+    @staticmethod
+    def launch_installer(path: Path):
+        """Start the setup program detached; the caller then quits the app."""
+        log.info("Launching installer %s %s", path, " ".join(INSTALLER_ARGS))
+        flags = 0
+        if os.name == "nt":
+            flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+        subprocess.Popen([str(path)] + INSTALLER_ARGS, close_fds=True,
+                         creationflags=flags)
 
     # ── async ───────────────────────────────────────────────────────────
 
