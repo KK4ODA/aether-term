@@ -48,6 +48,17 @@ Format: [version] — YYYY-MM-DD, then a bulleted list of changes.
   `LINK UNREGISTERED` on a digipeated call, the terminal now notes that VARA FM
   requires a license to use digipeaters. *(gui/main_window.py)*
 
+### Build
+
+- **The release workflow builds the installer.** Publishing a release attaches
+  `Aether_Term_Setup_X.Y.Z.exe`, its zip and the portable zip, all built with
+  Inno Setup on GitHub's Windows runners. The workflow stops if `version.txt`
+  doesn't match the tag. Run by hand with a tag, it creates and publishes the
+  release itself, with this CHANGELOG section as its notes. Without a tag it
+  does a dry run that keeps the files as workflow artifacts. A test checks that
+  `version.txt`, `installer.iss` and the CHANGELOG agree.
+  *(.github/workflows/build_release.yml)*
+
 ## [1.1.0] — 2026-10-10
 
 ### Changed
