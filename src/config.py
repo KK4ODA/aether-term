@@ -150,6 +150,9 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "session_logging": True,
     "show_ptt_events": False,  # hide PTT ON/OFF from terminal by default
     "target_history": [],  # recently connected callsigns (most recent first)
+    "via_history": [],     # digipeaters used before (most recent first)
+    "last_via1": "",       # Via 1 / Via 2 of the last call ("" = None)
+    "last_via2": "",
 
     # Macros
     "macros": DEFAULT_MACROS,

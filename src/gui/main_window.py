@@ -41,6 +41,11 @@ from gui.profile_dialog import ProfileDialog
 
 log = logging.getLogger(__name__)
 
+# Via 1 / Via 2 dropdowns: the "no digipeater" entry, and how many
+# digipeaters they remember.
+VIA_NONE = "None"
+MAX_VIA_HISTORY = 10
+
 # How long the BBS must be quiet before an unfinished line (a prompt
 # without a line end) is shown.  VARA hands data over a frame at a time,
 # often mid-line, a second or more apart on a slow link.
@@ -242,22 +247,21 @@ class MainWindow(QMainWindow):
             self.target_input.setCurrentText("")
         row1.addWidget(self.target_input, stretch=1)
 
+        # Via 1 / Via 2: "None" or a digipeater used before (or type a new
+        # one); the last call's choice comes back next time.
         row1.addWidget(QLabel("Via 1:"))
-        self.via1_input = QLineEdit()
-        self.via1_input.setPlaceholderText("(optional)")
-        self.via1_input.setMaximumWidth(120)
-        self.via1_input.setToolTip(
+        self.via1_input = self._make_via_combo(
             "First digipeater in the path (VARA FM only).\n"
-            "Leave blank for direct connection.\n"
-            "Connecting via digipeaters needs a registered VARA license."
-        )
+            "None for a direct connection.\n"
+            "Connecting via digipeaters needs a registered VARA license.",
+            self.config.get("last_via1", ""))
         row1.addWidget(self.via1_input)
 
         row1.addWidget(QLabel("Via 2:"))
-        self.via2_input = QLineEdit()
-        self.via2_input.setPlaceholderText("(optional)")
-        self.via2_input.setMaximumWidth(120)
-        self.via2_input.setToolTip("Second digipeater in the path (VARA FM only).\nOnly needed for two-hop routes.")
+        self.via2_input = self._make_via_combo(
+            "Second digipeater in the path (VARA FM only).\n"
+            "Only needed for two-hop routes.",
+            self.config.get("last_via2", ""))
         row1.addWidget(self.via2_input)
 
         self.connect_btn = QPushButton("  Connect  ")
@@ -526,8 +530,8 @@ class MainWindow(QMainWindow):
         and the Soundmodem path would otherwise silently call direct.
         """
         try:
-            digis = parse_digipeaters(self.via1_input.text(),
-                                      self.via2_input.text())
+            digis = parse_digipeaters(self._via_value(self.via1_input),
+                                      self._via_value(self.via2_input))
         except ValueError as e:
             QMessageBox.warning(self, "Digipeater Path", str(e))
             self.via1_input.setFocus()
@@ -549,8 +553,10 @@ class MainWindow(QMainWindow):
 
         # Store target and digipeater path for later use
         self._target = target
-        self._via = parse_digipeaters(self.via1_input.text(),
-                                      self.via2_input.text())
+        via1 = self._via_value(self.via1_input)
+        via2 = self._via_value(self.via2_input)
+        self._via = parse_digipeaters(via1, via2)
+        self._remember_via(via1, via2)
         path = f" via {', '.join(self._via)}" if self._via else ""
         self.terminal.display.append_system(
             f"Connecting to {target}{path} as {callsign} using {mode}...")
@@ -1221,8 +1227,8 @@ class MainWindow(QMainWindow):
             self._active_profile = p
             self._update_title()
             self.target_input.setCurrentText(p.get("target_callsign", ""))
-            self.via1_input.setText(p.get("via1", ""))
-            self.via2_input.setText(p.get("via2", ""))
+            self._set_via(self.via1_input, p.get("via1", ""))
+            self._set_via(self.via2_input, p.get("via2", ""))
 
             mode = p.get("mode", "VARA FM")
             if mode != self.config.get("vara_mode"):
@@ -1279,6 +1285,60 @@ class MainWindow(QMainWindow):
                 self._session_log_file = None
 
     # ── Target history ────────────────────────────────────────────
+
+    # ── Via (digipeater) dropdowns ─────────────────────────────────
+
+    def _make_via_combo(self, tooltip: str, current: str) -> QComboBox:
+        cb = QComboBox()
+        cb.setEditable(True)
+        cb.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        cb.setMaximumWidth(130)
+        cb.setToolTip(tooltip)
+        self._fill_via_combo(cb)
+        self._set_via(cb, current)
+        return cb
+
+    def _fill_via_combo(self, cb: QComboBox):
+        cb.clear()
+        cb.addItem(VIA_NONE)
+        for call in self.config.get("via_history", []):
+            if call and isinstance(call, str):
+                cb.addItem(call.upper().strip())
+
+    @staticmethod
+    def _via_value(cb: QComboBox) -> str:
+        """The digipeater in a Via box, "" for None."""
+        text = cb.currentText().strip().upper()
+        return "" if text in ("", VIA_NONE.upper()) else text
+
+    @staticmethod
+    def _set_via(cb: QComboBox, value: str):
+        value = (value or "").strip().upper()
+        if not value:
+            cb.setCurrentIndex(0)           # None
+        else:
+            i = cb.findText(value)
+            if i >= 0:
+                cb.setCurrentIndex(i)
+            else:
+                cb.setCurrentText(value)
+
+    def _remember_via(self, via1: str, via2: str):
+        """Keep this call's Via choices (None too) and add new digipeaters
+        to both dropdowns, most recent first."""
+        history = list(self.config.get("via_history", []))
+        for call in (via2, via1):           # via1 ends up first
+            if call:
+                if call in history:
+                    history.remove(call)
+                history.insert(0, call)
+        self.config.set("via_history", history[:MAX_VIA_HISTORY])
+        self.config.set("last_via1", via1)
+        self.config.set("last_via2", via2)
+        self.config.save()
+        for cb, value in ((self.via1_input, via1), (self.via2_input, via2)):
+            self._fill_via_combo(cb)
+            self._set_via(cb, value)
 
     def _add_to_target_history(self, callsign: str):
         """Add a callsign to the target dropdown history."""
@@ -1529,8 +1589,8 @@ class MainWindow(QMainWindow):
         self._active_profile = profile
         self._update_title()
         self.target_input.setCurrentText(profile.get("target_callsign", ""))
-        self.via1_input.setText(profile.get("via1", ""))
-        self.via2_input.setText(profile.get("via2", ""))
+        self._set_via(self.via1_input, profile.get("via1", ""))
+        self._set_via(self.via2_input, profile.get("via2", ""))
         mode = profile.get("mode", "VARA FM")
         self.config.set("vara_mode", mode)
         self._apply_profile_bandwidth(profile)

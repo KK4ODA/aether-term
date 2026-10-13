@@ -5,6 +5,17 @@ Format: [version] — YYYY-MM-DD, then a bulleted list of changes.
 
 ---
 
+## [1.1.4] — 2026-10-13
+
+### Changed
+
+- **Via 1 / Via 2 are dropdowns that remember.** Both boxes offer **None**
+  plus the digipeaters you have used before, most recent first, up to 10. You
+  can still type a new one. Each call's choice, None included, is saved and
+  comes back the next time Aether Term starts, so a digipeated route is not
+  lost to an empty box. Picking a profile still fills both boxes.
+  *(gui/main_window.py, config.py)*
+
 ## [1.1.3] — 2026-10-13
 
 ### Fixed
