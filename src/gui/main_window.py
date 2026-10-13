@@ -73,6 +73,7 @@ class MainWindow(QMainWindow):
         self._session_log_file = None
         self._session_start: Optional[datetime] = None
         self._data_buffer = ""
+        self._data_ended_cr = False       # last data chunk ended in CR
         self._active_profile: Optional[dict] = None
         self._rf_session_up = False    # a CONNECTED was seen for this call
 
@@ -656,6 +657,7 @@ class MainWindow(QMainWindow):
         # Reset auth state
         self.auth.reset()
         self._data_buffer = ""
+        self._data_ended_cr = False
 
         # Start session timer
         self._session_start = datetime.now(timezone.utc)
@@ -741,17 +743,24 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(str)
     def _on_data_received(self, text: str):
-        """Process incoming data from the BBS."""
-        self._data_buffer += text
+        """Process incoming data from the BBS.
+
+        Lines may end in CR LF, LF, or a bare CR — BPQ nodes and most
+        packet BBSes send CR only.  A CR LF split across two chunks counts
+        as one line end.
+        """
+        if self._data_ended_cr and text.startswith("\n"):
+            text = text[1:]
+        self._data_ended_cr = text.endswith("\r")
+        self._data_buffer += text.replace("\r\n", "\n").replace("\r", "\n")
 
         # Process complete lines
         while "\n" in self._data_buffer:
             line, self._data_buffer = self._data_buffer.split("\n", 1)
-            line = line.rstrip("\r")
             self._process_line(line)
 
         # Handle partial data (prompt characters like "> ")
-        if self._data_buffer and not self._data_buffer.endswith("\r"):
+        if self._data_buffer:
             # Check if it looks like a prompt (short, ends with space or >)
             if len(self._data_buffer) < 10 and (
                     self._data_buffer.rstrip().endswith(">") or

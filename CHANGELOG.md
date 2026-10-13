@@ -5,6 +5,16 @@ Format: [version] — YYYY-MM-DD, then a bulleted list of changes.
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **BPQ nodes and other CR-only BBSes now display.** Incoming text was only
+  split into lines at LF. A BPQ node ends its lines with a bare CR, so its
+  banner, prompts and command replies piled up unseen and the node seemed not
+  to answer. CR, LF and CR LF now all end a line, including a CR LF split
+  across two chunks. *(gui/main_window.py)*
+
 ## [1.1.1] — 2026-10-13
 
 ### Added
