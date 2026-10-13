@@ -192,6 +192,38 @@ def test_line_end_detection(qapp, win, chunks, eol):
     assert win._line_end() == ("\r\n" if eol in ("\r\n", "\n") else "\r")
 
 
+def test_prompt_without_line_end_is_shown_after_a_pause(qapp, win):
+    """BPQ apps wait at prompts like '4 Back:' with no line end."""
+    win._on_data_received("1 Check in  2 Ch")
+    win._on_data_received("eck out  3 Roster  4 Back:")
+    assert "4 Back:" not in text(win)          # not before the BBS goes quiet
+    assert pump(qapp, until=lambda: "4 Back:" in text(win), timeout=3)
+    win._on_data_received("\rReturned to Node STONEM:KE4QCM-7\r")
+    shown = text(win)
+    assert "1 Check in  2 Check out  3 Roster  4 Back:\nReturned to Node" in shown
+    assert shown.count("4 Back:") == 1
+
+
+def test_line_split_across_frames_reads_as_one_line(qapp, win):
+    """VARA splits lines at frame boundaries; a slow second half must
+    continue the screen line, not start a new one or repeat the first."""
+    win._on_data_received("*** Connec")
+    pump(qapp, 1.3)                            # slow link: first half shown
+    assert "*** Connec" in text(win)
+    win._on_data_received("ted to ARES        \r====\r")
+    shown = text(win)
+    assert "*** Connected to ARES        \n====\n" in shown
+    assert shown.count("*** Connec") == 1
+
+
+def test_protocol_lines_are_never_shown_half_way(qapp, win):
+    win._on_data_received(";TRANSPORT VA")
+    pump(qapp, 1.3)
+    assert ";TRANSPORT" not in text(win)
+    win._on_data_received("RA FM\r\n")
+    assert "BBS transport: VARA FM" in text(win)
+
+
 def test_wrong_modem_on_port_is_reported(qapp, win):
     win.fake.state["version_reply"] = "VERSION VARA HF 4.8.7"
     win._on_connect()

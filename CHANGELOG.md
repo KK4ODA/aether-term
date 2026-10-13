@@ -17,6 +17,12 @@ Format: [version] — YYYY-MM-DD, then a bulleted list of changes.
   node says nothing until spoken to, so the first line goes out with a bare
   CR. A BBS that greets first shows its CR LF before you type.
   *(gui/main_window.py)*
+- **Prompts without a line end are shown.** BPQ applications wait at prompts
+  such as `1 Check in  2 Check out  3 Roster  4 Back:` with no line end, and
+  only short prompts ending in `>` or `:` used to appear. Now any unfinished
+  line is shown once the BBS has been quiet for a second. When the rest of the
+  line arrives, it continues on the same screen line, so a line VARA split
+  across radio frames still reads as one line. *(gui/main_window.py)*
 - **No `;TRANSPORT?` to BBSes that don't know it.** The Aether BBS transport
   query used to go out one second after every connect, and a BPQ node read it
   as a bad command. It is now sent only once the BBS has shown CR LF line

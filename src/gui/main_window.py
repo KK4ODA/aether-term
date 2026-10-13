@@ -41,6 +41,11 @@ from gui.profile_dialog import ProfileDialog
 
 log = logging.getLogger(__name__)
 
+# How long the BBS must be quiet before an unfinished line (a prompt
+# without a line end) is shown.  VARA hands data over a frame at a time,
+# often mid-line, a second or more apart on a slow link.
+PARTIAL_LINE_DELAY_MS = 1000
+
 APP_TAGLINE = "BBS Terminal Client for VARA and Aether HF"
 
 # Toolbar mode combo: (label, config value), in index order
@@ -70,6 +75,14 @@ class MainWindow(QMainWindow):
         self._cleanup_timer.setSingleShot(True)
         self._cleanup_timer.setInterval(500)
         self._cleanup_timer.timeout.connect(self._cleanup_modem_connection)
+        # Text that waits without a line end (a menu prompt such as
+        # "4 Back:") is shown once the BBS goes quiet; the rest of that
+        # line, when it comes, continues on the same screen line.
+        self._partial_timer = QTimer(self)
+        self._partial_timer.setSingleShot(True)
+        self._partial_timer.setInterval(PARTIAL_LINE_DELAY_MS)
+        self._partial_timer.timeout.connect(self._show_partial_line)
+        self._partial_shown = ""           # part of the current line already on screen
         self._session_log_file = None
         self._session_start: Optional[datetime] = None
         self._data_buffer = ""
@@ -666,6 +679,7 @@ class MainWindow(QMainWindow):
         self.auth.reset()
         self._data_buffer = ""
         self._data_ended_cr = False
+        self._partial_shown = ""
 
         # Start session timer
         self._session_start = datetime.now(timezone.utc)
@@ -802,7 +816,8 @@ class MainWindow(QMainWindow):
         # Process complete lines
         while "\n" in self._data_buffer:
             line, self._data_buffer = self._data_buffer.split("\n", 1)
-            self._process_line(line)
+            shown, self._partial_shown = self._partial_shown, ""
+            self._process_line(line, shown)
 
         # Handle partial data (prompt characters like "> ")
         if self._data_buffer:
@@ -820,10 +835,38 @@ class MainWindow(QMainWindow):
                     self.config.get("show_auth_protocol", False),
                 )
                 if not action.suppress:
-                    self.terminal.display.append_text(prompt, "normal")
+                    self.terminal.display.append_text(
+                        prompt[len(self._partial_shown):], "normal")
+                self._partial_shown = ""
 
-    def _process_line(self, line: str):
-        """Process a single complete line from the BBS."""
+        # VARA hands data over a radio frame at a time, often mid-line, so a
+        # piece is only shown once nothing more has come for a moment.
+        if self._data_buffer:
+            self._partial_timer.start()
+        else:
+            self._partial_timer.stop()
+
+    def _show_partial_line(self):
+        """Show the unfinished line the BBS has stopped at (a prompt)."""
+        buf = self._data_buffer
+        if not buf or buf.startswith(";") or buf == self._partial_shown:
+            return                          # ;protocol lines stay hidden
+        self.terminal.display.append_text(buf[len(self._partial_shown):], "normal")
+        self._partial_shown = buf
+
+    def _process_line(self, line: str, shown: str = ""):
+        """Process a single complete line from the BBS.
+
+        *shown* is the start of the line already on screen (an unfinished
+        line shown while the BBS paused); only the rest is displayed.
+        """
+        if shown and not line.startswith(shown):
+            shown = ""
+        if shown and line == shown:
+            # Nothing new: just end the screen line
+            self.terminal.display.append_text("\n", "normal")
+            self._log_line(line)
+            return
         # Transport auto-detection (suppress from display)
         if self._handle_transport_response(line):
             self._log_line(line)
@@ -864,7 +907,9 @@ class MainWindow(QMainWindow):
             # Completely suppressed
             pass
         elif action.display_text:
-            # Custom display text
+            # Custom display text, on a line of its own
+            if shown:
+                self.terminal.display.append_text("\n", "normal")
             if action.is_success:
                 self.terminal.display.append_success(action.display_text)
                 self.passwords.update_last_used(target, self._effective_callsign())
@@ -875,6 +920,9 @@ class MainWindow(QMainWindow):
                 self.terminal.display.append_warning(action.display_text)
             else:
                 self.terminal.display.append_system(action.display_text)
+        elif shown:
+            # Finish the screen line the partial display started
+            self.terminal.display.append_line(line[len(shown):], "normal")
         else:
             # Normal line — display as-is
             self.terminal.display.append_line(line, "normal")
