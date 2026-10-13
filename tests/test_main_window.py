@@ -51,7 +51,7 @@ def test_status_bar_shows_aether(qapp, win):
 def test_preflight_stops_the_call(qapp, win, change, expected):
     win.fake.state.update(change)
     win._on_connect()
-    assert pump(qapp, until=lambda: "Not connecting" in text(win))
+    assert pump(qapp, until=lambda: "Not connecting" in text(win)), text(win)[-600:]
     assert expected in text(win)
     assert win.fake.commands == []
     assert win.connect_btn.isEnabled()
@@ -142,6 +142,86 @@ def test_incoming_lines_end_in_cr_lf_or_both(qapp, win, chunks):
     # A CR LF never turns into an extra blank line
     assert "node\n\n" not in shown
     assert win._data_buffer == ""
+
+
+def _sent(win):
+    return b"".join(win.fake.data)
+
+
+def test_aether_bbs_gets_cr_lf_and_transport_query(qapp, win):
+    """The Aether BBS (CR LF lines) is asked ;TRANSPORT? and gets CR LF."""
+    win._on_connect()
+    assert pump(qapp, until=lambda: "Welcome to the test BBS" in text(win), timeout=15)
+    assert pump(qapp, until=lambda: b";TRANSPORT?\r\n" in _sent(win))
+    win._send_text("H")
+    assert pump(qapp, until=lambda: b"H\r\n" in _sent(win))
+
+
+def test_bpq_node_gets_bare_cr_and_no_transport_query(qapp, win):
+    """A BPQ node ends lines with a bare CR, and reads an LF after the CR
+    as the start of the next command: answer it in its own convention."""
+    win.fake.state["bbs"] = "bpq"
+    win._on_connect()
+    assert pump(qapp, until=lambda: "CONNECTED to W1AW-5" in text(win), timeout=15)
+    pump(qapp, 1.5)                       # the old fixed-delay query fired at 1 s
+    assert _sent(win) == b""              # nothing unasked-for went to the node
+    win._send_text("H")                   # node silent so far: bare CR
+    assert pump(qapp, until=lambda: "Help file not found" in text(win))
+    win._send_text("?")
+    win._send_text("CHAT")
+    assert pump(qapp, until=lambda: _sent(win).endswith(b"CHAT\r"))
+    assert _sent(win) == b"H\r?\rCHAT\r"
+    assert b";TRANSPORT?" not in _sent(win)
+
+
+@pytest.mark.parametrize("chunks,eol", [
+    ([], None),                                               # nothing yet: bare CR
+    (["STONEM:KE4QCM-7} Help file not found\r"], "\r"),      # BPQ reply
+    (["STONEM:KE4QCM-7} Help\rnext"], "\r"),
+    (["line\r", "\nnext"], "\r\n"),                         # CR LF split across chunks
+    (["Welcome\r\n", "prompt\r"], "\r\n"),                 # CR LF evidence is final
+    (["line\r", "next\r"], "\r"),
+    (["line\n"], "\n"),
+])
+def test_line_end_detection(qapp, win, chunks, eol):
+    win._remote_eol = ""
+    win._transport_query_pending = False
+    for c in chunks:
+        win._on_data_received(c)
+    assert (win._remote_eol or None) == eol
+    assert win._line_end() == ("\r\n" if eol in ("\r\n", "\n") else "\r")
+
+
+def test_prompt_without_line_end_is_shown_after_a_pause(qapp, win):
+    """BPQ apps wait at prompts like '4 Back:' with no line end."""
+    win._on_data_received("1 Check in  2 Ch")
+    win._on_data_received("eck out  3 Roster  4 Back:")
+    assert "4 Back:" not in text(win)          # not before the BBS goes quiet
+    assert pump(qapp, until=lambda: "4 Back:" in text(win), timeout=3)
+    win._on_data_received("\rReturned to Node STONEM:KE4QCM-7\r")
+    shown = text(win)
+    assert "1 Check in  2 Check out  3 Roster  4 Back:\nReturned to Node" in shown
+    assert shown.count("4 Back:") == 1
+
+
+def test_line_split_across_frames_reads_as_one_line(qapp, win):
+    """VARA splits lines at frame boundaries; a slow second half must
+    continue the screen line, not start a new one or repeat the first."""
+    win._on_data_received("*** Connec")
+    pump(qapp, 1.3)                            # slow link: first half shown
+    assert "*** Connec" in text(win)
+    win._on_data_received("ted to ARES        \r====\r")
+    shown = text(win)
+    assert "*** Connected to ARES        \n====\n" in shown
+    assert shown.count("*** Connec") == 1
+
+
+def test_protocol_lines_are_never_shown_half_way(qapp, win):
+    win._on_data_received(";TRANSPORT VA")
+    pump(qapp, 1.3)
+    assert ";TRANSPORT" not in text(win)
+    win._on_data_received("RA FM\r\n")
+    assert "BBS transport: VARA FM" in text(win)
 
 
 def test_wrong_modem_on_port_is_reported(qapp, win):

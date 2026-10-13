@@ -41,6 +41,11 @@ from gui.profile_dialog import ProfileDialog
 
 log = logging.getLogger(__name__)
 
+# How long the BBS must be quiet before an unfinished line (a prompt
+# without a line end) is shown.  VARA hands data over a frame at a time,
+# often mid-line, a second or more apart on a slow link.
+PARTIAL_LINE_DELAY_MS = 1000
+
 APP_TAGLINE = "BBS Terminal Client for VARA and Aether HF"
 
 # Toolbar mode combo: (label, config value), in index order
@@ -70,10 +75,20 @@ class MainWindow(QMainWindow):
         self._cleanup_timer.setSingleShot(True)
         self._cleanup_timer.setInterval(500)
         self._cleanup_timer.timeout.connect(self._cleanup_modem_connection)
+        # Text that waits without a line end (a menu prompt such as
+        # "4 Back:") is shown once the BBS goes quiet; the rest of that
+        # line, when it comes, continues on the same screen line.
+        self._partial_timer = QTimer(self)
+        self._partial_timer.setSingleShot(True)
+        self._partial_timer.setInterval(PARTIAL_LINE_DELAY_MS)
+        self._partial_timer.timeout.connect(self._show_partial_line)
+        self._partial_shown = ""           # part of the current line already on screen
         self._session_log_file = None
         self._session_start: Optional[datetime] = None
         self._data_buffer = ""
         self._data_ended_cr = False       # last data chunk ended in CR
+        self._remote_eol = ""             # BBS line end once seen: "\r\n", "\r" or "\n"
+        self._transport_query_pending = False
         self._active_profile: Optional[dict] = None
         self._rf_session_up = False    # a CONNECTED was seen for this call
 
@@ -545,6 +560,12 @@ class MainWindow(QMainWindow):
                 "through digipeaters.")
         self._connect_in_progress = True
         self._rf_session_up = False
+        # The BBS's line ends are learned afresh for each call.  ;TRANSPORT?
+        # is an Aether BBS extension: it goes out only once the BBS shows
+        # CR LF line ends — a BPQ node (bare CR) would take it as a bad
+        # command.
+        self._remote_eol = ""
+        self._transport_query_pending = True
         self.speed_label.setText("Speed: —")
         self._cleanup_timer.stop()  # cancel any stale cleanup timer
 
@@ -658,6 +679,7 @@ class MainWindow(QMainWindow):
         self.auth.reset()
         self._data_buffer = ""
         self._data_ended_cr = False
+        self._partial_shown = ""
 
         # Start session timer
         self._session_start = datetime.now(timezone.utc)
@@ -667,8 +689,8 @@ class MainWindow(QMainWindow):
         if self.config.get("session_logging"):
             self._start_session_log(remote)
 
-        # Query BBS transport type
-        QTimer.singleShot(1000, self._query_transport)
+        # ;TRANSPORT? is sent by _note_line_ending once the BBS shows CR LF
+        # line ends (set up in _begin_connect).
 
     @pyqtSlot()
     def _on_rf_disconnected(self):
@@ -730,8 +752,44 @@ class MainWindow(QMainWindow):
                 "Not connected — command not sent.")
             return
         self.terminal.display.append_text(f"> {text}\n", "dim")
-        self.modem.send_data(text + "\r\n")
+        self.modem.send_data(text + self._line_end())
         self._log_line(f"> {text}")
+
+    def _line_end(self) -> str:
+        """Line end for what the user types: the BBS's own convention.
+
+        BPQ nodes (and most packet BBSes) end lines with a bare CR and read
+        an LF after it as the start of the next command; the Aether BBS
+        uses CR LF.  A BPQ node says nothing until spoken to, so before the
+        BBS has sent a line end the answer is a bare CR; a BBS that greets
+        first (the Aether BBS) has shown its CR LF by the time you type.
+        """
+        return "\r\n" if self._remote_eol in ("\r\n", "\n") else "\r"
+
+    def _note_line_ending(self, text: str):
+        """Learn the BBS's line end from the data it sends.
+
+        CR LF evidence (in one chunk, or a CR ending one chunk and an LF
+        starting the next) is final.  A bare CR — inside a chunk, or ending
+        one, as BPQ's replies do — means CR until CR LF evidence turns up.
+        """
+        if "\r\n" in text or (self._data_ended_cr and text.startswith("\n")):
+            eol = "\r\n"
+        elif self._remote_eol == "\r\n":
+            return
+        elif "\r" in text or self._data_ended_cr:
+            eol = "\r"
+        elif "\n" in text and not self._remote_eol:
+            eol = "\n"
+        else:
+            return
+        if eol == self._remote_eol:
+            return
+        self._remote_eol = eol
+        log.info("BBS line ends: %s", {"\r\n": "CR LF", "\r": "CR", "\n": "LF"}[eol])
+        if eol == "\r\n" and self._transport_query_pending:
+            self._transport_query_pending = False
+            QTimer.singleShot(0, self._query_transport)
 
     def _on_command(self, text: str):
         """User typed a command in the input bar."""
@@ -749,6 +807,7 @@ class MainWindow(QMainWindow):
         packet BBSes send CR only.  A CR LF split across two chunks counts
         as one line end.
         """
+        self._note_line_ending(text)
         if self._data_ended_cr and text.startswith("\n"):
             text = text[1:]
         self._data_ended_cr = text.endswith("\r")
@@ -757,7 +816,8 @@ class MainWindow(QMainWindow):
         # Process complete lines
         while "\n" in self._data_buffer:
             line, self._data_buffer = self._data_buffer.split("\n", 1)
-            self._process_line(line)
+            shown, self._partial_shown = self._partial_shown, ""
+            self._process_line(line, shown)
 
         # Handle partial data (prompt characters like "> ")
         if self._data_buffer:
@@ -775,10 +835,38 @@ class MainWindow(QMainWindow):
                     self.config.get("show_auth_protocol", False),
                 )
                 if not action.suppress:
-                    self.terminal.display.append_text(prompt, "normal")
+                    self.terminal.display.append_text(
+                        prompt[len(self._partial_shown):], "normal")
+                self._partial_shown = ""
 
-    def _process_line(self, line: str):
-        """Process a single complete line from the BBS."""
+        # VARA hands data over a radio frame at a time, often mid-line, so a
+        # piece is only shown once nothing more has come for a moment.
+        if self._data_buffer:
+            self._partial_timer.start()
+        else:
+            self._partial_timer.stop()
+
+    def _show_partial_line(self):
+        """Show the unfinished line the BBS has stopped at (a prompt)."""
+        buf = self._data_buffer
+        if not buf or buf.startswith(";") or buf == self._partial_shown:
+            return                          # ;protocol lines stay hidden
+        self.terminal.display.append_text(buf[len(self._partial_shown):], "normal")
+        self._partial_shown = buf
+
+    def _process_line(self, line: str, shown: str = ""):
+        """Process a single complete line from the BBS.
+
+        *shown* is the start of the line already on screen (an unfinished
+        line shown while the BBS paused); only the rest is displayed.
+        """
+        if shown and not line.startswith(shown):
+            shown = ""
+        if shown and line == shown:
+            # Nothing new: just end the screen line
+            self.terminal.display.append_text("\n", "normal")
+            self._log_line(line)
+            return
         # Transport auto-detection (suppress from display)
         if self._handle_transport_response(line):
             self._log_line(line)
@@ -819,7 +907,9 @@ class MainWindow(QMainWindow):
             # Completely suppressed
             pass
         elif action.display_text:
-            # Custom display text
+            # Custom display text, on a line of its own
+            if shown:
+                self.terminal.display.append_text("\n", "normal")
             if action.is_success:
                 self.terminal.display.append_success(action.display_text)
                 self.passwords.update_last_used(target, self._effective_callsign())
@@ -830,6 +920,9 @@ class MainWindow(QMainWindow):
                 self.terminal.display.append_warning(action.display_text)
             else:
                 self.terminal.display.append_system(action.display_text)
+        elif shown:
+            # Finish the screen line the partial display started
+            self.terminal.display.append_line(line[len(shown):], "normal")
         else:
             # Normal line — display as-is
             self.terminal.display.append_line(line, "normal")
