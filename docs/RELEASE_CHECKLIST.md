@@ -17,7 +17,8 @@ current Aether HF build, if its host interface or control API changed
 
 ## 2. Update Version Number
 
-☐ Update `version.txt` and `MyAppVersion` in `installer.iss`\
+☐ Update `version.txt` and `MyAppVersion` in `installer.iss` (a test checks
+they match)\
 ☐ Follow Semantic Versioning:
 
 MAJOR.MINOR.PATCH
@@ -71,15 +72,19 @@ Release title: `Aether Term X.Y.Z`
 
 ------------------------------------------------------------------------
 
-## 6. Upload Release Files
+## 6. Release Files
 
-Attach:
+Nothing to attach by hand: when the release is published, the **Build Aether
+Term Release** workflow builds on Windows and attaches
 
-☐ Installer (`Aether_Term_Setup_X.Y.Z.exe`) and portable zip. Keep the installer's file name:
-  the in-app updater looks for the `Aether_Term_Setup_*.exe` asset on the latest release.
-(`Aether_Term_Portable_X.Y.Z.zip`) from `build.bat` — the release workflow
-also attaches a portable zip automatically\
-☐ Source code archive (optional)
+☐ `Aether_Term_Setup_X.Y.Z.exe` — the in-app updater downloads this file, so
+  keep its name\
+☐ `Aether_Term_Setup_X.Y.Z.zip` (the installer, zipped for sharing)\
+☐ `Aether_Term_Portable_X.Y.Z.zip`
+
+It stops if `version.txt` does not match the tag. To try the build before
+tagging, run the workflow by hand with an empty tag: the files are kept as
+workflow artifacts. `build.bat` builds the same files locally.
 
 ------------------------------------------------------------------------
 
