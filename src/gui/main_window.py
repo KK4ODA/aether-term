@@ -28,7 +28,7 @@ from aether.control import (AetherMonitor, AetherQuery, AetherStatus,
                             AETHER_HOST_GUIDE_URL)
 from passwords import PasswordStore
 from auth import AuthInterceptor
-from vara.modem import VARAModem
+from vara.modem import VARAModem, parse_digipeaters
 from vara.connection import ConnectionState, STATE_LABELS, STATE_COLORS
 from vara.ptt import PTTController
 from gui.theme import C, STATE_HEX, build_stylesheet, macro_btn_style, \
@@ -231,9 +231,9 @@ class MainWindow(QMainWindow):
         self.via1_input.setPlaceholderText("(optional)")
         self.via1_input.setMaximumWidth(120)
         self.via1_input.setToolTip(
-            "First digipeater in the AX.25 path.\n"
+            "First digipeater in the path (VARA FM only).\n"
             "Leave blank for direct connection.\n"
-            "Used for HF or packet routing through relay stations."
+            "Connecting via digipeaters needs a registered VARA license."
         )
         row1.addWidget(self.via1_input)
 
@@ -241,7 +241,7 @@ class MainWindow(QMainWindow):
         self.via2_input = QLineEdit()
         self.via2_input.setPlaceholderText("(optional)")
         self.via2_input.setMaximumWidth(120)
-        self.via2_input.setToolTip("Second digipeater in the AX.25 path.\nOnly needed for multi-hop routes.")
+        self.via2_input.setToolTip("Second digipeater in the path (VARA FM only).\nOnly needed for two-hop routes.")
         row1.addWidget(self.via2_input)
 
         self.connect_btn = QPushButton("  Connect  ")
@@ -446,7 +446,8 @@ class MainWindow(QMainWindow):
                 lambda v: self.speed_label.setText(f"Speed: {v}"),
                 Qt.ConnectionType.QueuedConnection)
             self.modem.session_bandwidth.connect(
-                lambda bw: self.bw_label.setText(f"BW: {bw} Hz"),
+                lambda bw: self.bw_label.setText(
+                    f"BW: {bw} Hz" if bw.isdigit() else f"BW: {bw}"),
                 Qt.ConnectionType.QueuedConnection)
             self.modem.version_report.connect(
                 self._on_version_report, Qt.ConnectionType.QueuedConnection)
@@ -480,6 +481,9 @@ class MainWindow(QMainWindow):
         if self._preflight_pending:
             return
 
+        if not self._check_digipeaters():
+            return
+
         if self.config.is_aether:
             # Ask the modem first, on a worker thread; the connect continues
             # in _on_aether_preflight once it answers (or does not).
@@ -499,18 +503,45 @@ class MainWindow(QMainWindow):
             self._begin_connect(callsign, target)
         self._update_ui_state()
 
+    def _check_digipeaters(self) -> bool:
+        """Validate the Via fields; False (after telling the user) to stop.
+
+        Only VARA FM can route through digipeaters — VARA HF, Aether HF
+        and the Soundmodem path would otherwise silently call direct.
+        """
+        try:
+            digis = parse_digipeaters(self.via1_input.text(),
+                                      self.via2_input.text())
+        except ValueError as e:
+            QMessageBox.warning(self, "Digipeater Path", str(e))
+            self.via1_input.setFocus()
+            return False
+        if digis and self.config.mode != MODE_VARA_FM:
+            QMessageBox.warning(
+                self, "Digipeater Path",
+                "Digipeaters are only supported in VARA FM mode.\n\n"
+                f"Clear Via 1 / Via 2 to call direct with "
+                f"{_MODE_LABEL.get(self.config.mode, self.config.mode)}, "
+                "or switch to VARA FM.")
+            return False
+        return True
+
     def _begin_connect(self, callsign: str, target: str):
         """Open the modem link and start the call (after any preflight)."""
         mode = self.config.mode
         is_agwpe = (mode == MODE_AGWPE)
 
-        self.terminal.display.append_system(
-            f"Connecting to {target} as {callsign} via {mode}...")
-
-        # Store target for later use
+        # Store target and digipeater path for later use
         self._target = target
-        self._via1 = self.via1_input.text().upper().strip()
-        self._via2 = self.via2_input.text().upper().strip()
+        self._via = parse_digipeaters(self.via1_input.text(),
+                                      self.via2_input.text())
+        path = f" via {', '.join(self._via)}" if self._via else ""
+        self.terminal.display.append_system(
+            f"Connecting to {target}{path} as {callsign} using {mode}...")
+        if self._via:
+            self.terminal.display.append_system(
+                "Note: VARA FM needs a registered VARA license to connect "
+                "through digipeaters.")
         self._connect_in_progress = True
         self._rf_session_up = False
         self.speed_label.setText("Speed: —")
@@ -585,12 +616,11 @@ class MainWindow(QMainWindow):
         if self.modem.state != ConnectionState.MODEM_CONNECTED:
             return
         target = getattr(self, '_target', '')
-        via1 = getattr(self, '_via1', '')
-        via2 = getattr(self, '_via2', '')
+        via = getattr(self, '_via', [])
         callsign = self._effective_callsign()
 
         self.terminal.display.append_system(f"Initiating RF connection to {target}...")
-        self.modem.rf_connect(callsign, target, via1, via2)
+        self.modem.rf_connect(callsign, target, *via)
 
     @pyqtSlot(str)
     def _on_rf_connected(self, calls_str: str):
@@ -613,7 +643,9 @@ class MainWindow(QMainWindow):
             remote = getattr(self, '_target', 'UNKNOWN')
 
         self._rf_session_up = True
-        self.terminal.display.append_success(f"*** CONNECTED to {remote} ***")
+        via = getattr(self.modem, "connected_via", [])
+        path = f" via {', '.join(via)}" if via else ""
+        self.terminal.display.append_success(f"*** CONNECTED to {remote}{path} ***")
         self.terminal.set_input_enabled(True)
         self.terminal.input.setFocus()
 
@@ -917,6 +949,10 @@ class MainWindow(QMainWindow):
                 f"[MODEM] Command rejected: WRONG{cmd_hint}")
         elif upper == "CANCELPENDING":
             self.terminal.display.append_warning("[MODEM] Connection attempt cancelled")
+        elif upper == "LINK UNREGISTERED" and getattr(self, "_via", []):
+            self.terminal.display.append_warning(
+                "[MODEM] VARA reports this link as unregistered — VARA FM "
+                "requires a VARA license to connect through digipeaters.")
         elif upper == "MISSING SOUNDCARD":
             self.terminal.display.append_error(
                 "[MODEM] The modem's sound card would not open — it can neither "

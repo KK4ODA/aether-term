@@ -32,6 +32,67 @@ def test_vara_connected_without_bandwidth(modem):
     assert "session_bandwidth" not in modem.got
 
 
+def test_vara_fm_connected_via_digipeaters(modem):
+    modem._handle_event("CONNECTED KK4ODA W1AW-5 via N4XYZ-7 K4ABC-1 WIDE")
+    assert modem.got["rf_connected"] == [("KK4ODA W1AW-5",)]
+    assert modem.connected_via == ["N4XYZ-7", "K4ABC-1"]
+    assert modem.got["session_bandwidth"] == [("WIDE",)]
+    modem._handle_event("DISCONNECTED")
+    assert modem.connected_via == []
+
+
+def test_vara_fm_connected_via_one_digipeater(modem):
+    modem._handle_event("CONNECTED KK4ODA W1AW-5 via N4XYZ-7 NARROW")
+    assert modem.connected_via == ["N4XYZ-7"]
+    assert modem.got["session_bandwidth"] == [("NARROW",)]
+
+
+@pytest.mark.parametrize("via1,via2,expected", [
+    ("", "", []),
+    ("n4xyz-7", "", ["N4XYZ-7"]),
+    ("N4XYZ-7", "K4ABC-1", ["N4XYZ-7", "K4ABC-1"]),
+    ("", "K4ABC-1", ["K4ABC-1"]),               # Via 2 alone is still a path
+    ("N4XYZ-7,K4ABC-1", "", ["N4XYZ-7", "K4ABC-1"]),
+    (" N4XYZ-7  K4ABC-1 ", "", ["N4XYZ-7", "K4ABC-1"]),
+])
+def test_parse_digipeaters(via1, via2, expected):
+    from vara.modem import parse_digipeaters
+    assert parse_digipeaters(via1, via2) == expected
+
+
+@pytest.mark.parametrize("via1,via2", [
+    ("N4XYZ-7,K4ABC-1", "W1AW-2"),   # three hops
+    ("N4XYZ-16", ""),                # bad SSID
+    ("AB", ""),                      # too short
+    ("N4XYZ/7", ""),
+])
+def test_parse_digipeaters_rejects(via1, via2):
+    from vara.modem import parse_digipeaters
+    with pytest.raises(ValueError):
+        parse_digipeaters(via1, via2)
+
+
+class _Sock:
+    def __init__(self):
+        self.sent = b""
+
+    def sendall(self, b):
+        self.sent += b
+
+
+@pytest.mark.parametrize("via,expected", [
+    ((), b"CONNECT KK4ODA W1AW-5\r"),
+    (("N4XYZ-7",), b"CONNECT KK4ODA W1AW-5 VIA N4XYZ-7\r"),
+    (("N4XYZ-7", "K4ABC-1"), b"CONNECT KK4ODA W1AW-5 VIA N4XYZ-7 K4ABC-1\r"),
+    (("", "K4ABC-1"), b"CONNECT KK4ODA W1AW-5 VIA K4ABC-1\r"),
+])
+def test_rf_connect_command(modem, via, expected):
+    """The VARA TNC reference: CONNECT Source Destination VIA Digi1 Digi2<cr>."""
+    modem._cmd_sock = _Sock()
+    modem.rf_connect("KK4ODA", "W1AW-5", *via)
+    assert modem._cmd_sock.sent == expected
+
+
 def test_bitrate(modem):
     modem._handle_event("BITRATE (9) 1450 BPS")
     assert modem.got["bitrate_report"] == [("1450 bps (mode 9)",)]

@@ -5,6 +5,29 @@ Format: [version] — YYYY-MM-DD, then a bulleted list of changes.
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **VARA FM digipeater connects.** Commands to the VARA modem now end in a
+  bare CR, as the VARA TNC command reference specifies, instead of CR LF. The
+  stray LF ended up at the start of the next command. The digipeater path is
+  now built as `CONNECT <me> <target> VIA <digi1> [<digi2>]` from either Via
+  field: a call typed only in Via 2 used to go out without the `VIA` keyword.
+  Both fields also accept calls separated by spaces or commas, are checked
+  against VARA's callsign rules, and allow at most two hops.
+  *(vara/modem.py)*
+- **Digipeated link reply parsed.** VARA FM answers
+  `CONNECTED <src> <dst> via <digis> <bw>`. The status bar used to show
+  "BW: via Hz". It now shows the bandwidth, and the terminal shows the path
+  (`*** CONNECTED to W1AW-5 via N4XYZ-7 ***`). *(vara/modem.py,
+  gui/main_window.py)*
+- **Digipeaters refused outside VARA FM.** VARA HF, Aether HF and Soundmodem
+  cannot use the Via fields. A call with a path in those modes now stops with
+  an explanation instead of going out direct. When VARA reports
+  `LINK UNREGISTERED` on a digipeated call, the terminal now notes that VARA FM
+  requires a license to use digipeaters. *(gui/main_window.py)*
+
 ## [1.1.0] — 2026-10-10
 
 ### Changed

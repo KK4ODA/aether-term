@@ -8,11 +8,12 @@ https://github.com/KK4ODA/aether-hf/blob/master/docs/spec/host-interfaces.md).
 Uses Qt signals to communicate events back to the GUI thread.
 """
 
+import re
 import socket
 import logging
 import threading
 import time
-from typing import Optional
+from typing import List, Optional
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
@@ -22,6 +23,34 @@ log = logging.getLogger(__name__)
 
 CONNECT_TIMEOUT = 10  # seconds
 CMD_ACK_TIMEOUT = 5   # seconds to wait for OK after a command
+
+# VARA FM routes through at most two digipeaters
+# ("CONNECT Source Destination VIA Digi1 Digi2<cr>" in the VARA TNC
+# command reference).  Calls are 3-7 of A-Z/0-9 with an optional SSID
+# of -1..-15, -T or -R.
+MAX_DIGIPEATERS = 2
+_CALLSIGN_RE = re.compile(r"^[A-Z0-9]{3,7}(-([1-9]|1[0-5]|T|R))?$")
+
+
+def parse_digipeaters(*fields: str) -> List[str]:
+    """Turn the Via entry fields into a validated digipeater list.
+
+    Each field may hold one call or several separated by spaces or
+    commas ("W1AW-5,K1ABC"); empty fields are skipped, so a call typed
+    only in Via 2 still lands in the path.  Raises ValueError with an
+    operator-facing message for a bad call or too many hops.
+    """
+    digis = []
+    for field in fields:
+        digis += [t for t in re.split(r"[\s,]+", (field or "").upper()) if t]
+    for call in digis:
+        if not _CALLSIGN_RE.match(call):
+            raise ValueError(f"'{call}' is not a valid digipeater callsign.")
+    if len(digis) > MAX_DIGIPEATERS:
+        raise ValueError(
+            f"VARA FM supports at most {MAX_DIGIPEATERS} digipeaters "
+            f"({len(digis)} given).")
+    return digis
 
 
 class VARAModem(QObject):
@@ -70,6 +99,7 @@ class VARAModem(QObject):
         self._init_cleanup = False       # True while sending cleanup DISCONNECT
         self._init_ack: Optional[threading.Event] = None  # set when VARA acks cleanup
         self._last_cmd: Optional[str] = None  # most recent command sent (for WRONG correlation)
+        self.connected_via: List[str] = []  # digipeaters named in the last CONNECTED
 
     @property
     def state(self) -> ConnectionState:
@@ -190,12 +220,15 @@ class VARAModem(QObject):
 
     def rf_connect(self, my_call: str, target: str,
                    via1: str = "", via2: str = ""):
-        """Initiate an RF connection to the target station."""
+        """Initiate an RF connection to the target station.
+
+        Digipeaters (VARA FM only) go out as
+        ``CONNECT <my_call> <target> VIA <digi1> [<digi2>]``.
+        """
         cmd = f"CONNECT {my_call} {target}"
-        if via1:
-            cmd += f" VIA {via1}"
-        if via2:
-            cmd += f" {via2}"
+        digis = parse_digipeaters(via1, via2)
+        if digis:
+            cmd += " VIA " + " ".join(digis)
         self._set_state(ConnectionState.CONNECTING)
         self._send_cmd(cmd)
 
@@ -266,7 +299,9 @@ class VARAModem(QObject):
             return
         try:
             self._last_cmd = cmd
-            self._cmd_sock.sendall((cmd + "\r\n").encode("ascii"))
+            # VARA commands end in a bare CR ("<cr>" in the TNC command
+            # reference); a trailing LF would lead the next command.
+            self._cmd_sock.sendall((cmd + "\r").encode("ascii"))
             log.info(f"CMD> {cmd}")
         except OSError as e:
             log.error(f"Command send error: {e}")
@@ -330,14 +365,24 @@ class VARAModem(QObject):
         if upper.startswith("CONNECTED"):
             parts = event.split()
             # VARA may send "CONNECTED <call1> <call2> [WIDE]"; Aether HF
-            # sends "CONNECTED <caller> <called> <bandwidth>".
+            # sends "CONNECTED <caller> <called> <bandwidth>"; VARA FM
+            # through digipeaters sends
+            # "CONNECTED <src> <dst> via <digi1> [<digi2>] <bw>".
             # The order of local/remote varies between VARA versions.
             # We store both and let the main window figure out which is
             # the remote based on our own callsign.
             call1 = parts[1] if len(parts) >= 2 else "UNKNOWN"
             call2 = parts[2] if len(parts) >= 3 else ""
-            if len(parts) >= 4:
-                self.session_bandwidth.emit(parts[3])
+            rest = parts[3:]
+            bw = ""
+            if rest and (rest[-1].isdigit()
+                         or rest[-1].upper() in ("WIDE", "NARROW")):
+                bw = rest.pop()
+            if rest and rest[0].upper() == "VIA":
+                rest = rest[1:]
+            self.connected_via = rest[:MAX_DIGIPEATERS]
+            if bw:
+                self.session_bandwidth.emit(bw)
             self._remote_call = call1  # default; main window may override
             self._set_state(ConnectionState.CONNECTED)
             self.rf_connected.emit(f"{call1} {call2}".strip())
@@ -345,6 +390,7 @@ class VARAModem(QObject):
 
         elif upper.startswith("DISCONNECTED"):
             self._remote_call = None
+            self.connected_via = []
             self._set_state(ConnectionState.MODEM_CONNECTED)
             self.rf_disconnected.emit()
             log.info("RF session disconnected")

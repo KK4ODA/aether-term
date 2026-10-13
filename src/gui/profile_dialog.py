@@ -107,11 +107,11 @@ class ProfileDialog(QDialog):
         form.addRow("HF Bandwidth:", self.bw_combo)
         self.via1_input = QLineEdit()
         self.via1_input.setPlaceholderText("Digipeater 1 (optional)")
-        self.via1_input.setToolTip("First digipeater callsign for AX.25 routing.")
+        self.via1_input.setToolTip("First digipeater callsign (VARA FM only).")
         form.addRow("Via 1:", self.via1_input)
         self.via2_input = QLineEdit()
         self.via2_input.setPlaceholderText("Digipeater 2 (optional)")
-        self.via2_input.setToolTip("Second digipeater callsign for AX.25 routing.")
+        self.via2_input.setToolTip("Second digipeater callsign (VARA FM only).")
         form.addRow("Via 2:", self.via2_input)
 
         right.addWidget(form_group)

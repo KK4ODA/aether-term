@@ -58,6 +58,7 @@ class FakeAetherd:
             "status_delay": 0.0,         # seconds before /v1/status answers
         }
         self.commands: list[str] = []
+        self.raw_commands = bytearray()   # exactly what arrived, terminators and all
         self.data: list[bytes] = []
         self._cmd_srv, self._data_srv = _adjacent_listeners()
         self.cmd_port = self._cmd_srv.getsockname()[1]
@@ -175,6 +176,7 @@ class FakeAetherd:
             if not b:
                 return
             buf += b
+            self.raw_commands += b
             while b"\r" in buf:
                 raw, buf = buf.split(b"\r", 1)
                 line = raw.strip().decode("ascii", "replace")
@@ -193,7 +195,12 @@ class FakeAetherd:
                 me, them = parts[1], parts[2]
                 self.state.update(state="connected", remote=them)
                 c.sendall(b"PTT ON\rPTT OFF\rSN 7\r")
-                c.sendall(f"CONNECTED {me} {them} 2300\r".encode())
+                if len(parts) > 4 and parts[3].upper() == "VIA":
+                    # VARA FM's form for a digipeated link
+                    digis = " ".join(parts[4:])
+                    c.sendall(f"CONNECTED {me} {them} via {digis} WIDE\r".encode())
+                else:
+                    c.sendall(f"CONNECTED {me} {them} 2300\r".encode())
                 c.sendall(b"ENCRYPTION DISABLED\rLINK REGISTERED\r")
                 c.sendall(b"BITRATE (9) 1450 BPS\r")
                 d.sendall(b"Welcome to the test BBS\r\n")
