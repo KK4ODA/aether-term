@@ -5,7 +5,7 @@ Format: [version] — YYYY-MM-DD, then a bulleted list of changes.
 
 ---
 
-## [Unreleased]
+## [1.1.1] — 2026-10-13
 
 ### Added
 

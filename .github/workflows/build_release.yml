@@ -5,12 +5,15 @@ on:
   # `gh release create` does when it uploads files) never fires "created".
   release:
     types: [published]
-  # Build and attach to an existing release by hand: Actions → Run workflow
+  # By hand: Actions → Run workflow.  With a tag, build that tag and attach
+  # to its release; without one, build the selected branch as a dry run and
+  # keep the files as workflow artifacts only.
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to build and attach to (e.g. v1.1.0)"
-        required: true
+        description: "Release tag to build and attach to (e.g. v1.1.1); empty = dry run"
+        required: false
+        default: ""
 
 permissions:
   contents: write   # attach the build to the release
@@ -25,7 +28,16 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ env.TAG }}
+          ref: ${{ env.TAG || github.ref }}
+
+      - name: Check version.txt against the tag
+        if: env.TAG != ''
+        run: |
+          $version = (Get-Content version.txt).Trim()
+          if ("v$version" -ne $env:TAG) {
+            Write-Error "version.txt says $version but the release tag is $env:TAG"
+            exit 1
+          }
 
       - name: Install Python
         uses: actions/setup-python@v5
@@ -37,14 +49,43 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: Build executable
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build executable, installer and zips
         run: |
           $version = (Get-Content version.txt).Trim()
-          pyinstaller --noconfirm aether_term.spec
+          pyinstaller --noconfirm --clean aether_term.spec
+          if (-not (Test-Path "dist/Aether Term/Aether Term.exe")) { throw "PyInstaller produced no exe" }
+          $iscc = @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+                    "${env:ProgramFiles}\Inno Setup 6\ISCC.exe") |
+                  Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) { $iscc = (Get-Command iscc -ErrorAction Stop).Source }
+          & $iscc installer.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
+          $setup = "dist/Aether_Term_Setup_$version.exe"
+          if (-not (Test-Path $setup)) { throw "$setup not found" }
+          # Same three files as build.bat: installer, zipped installer, portable zip
+          Compress-Archive -Path $setup -DestinationPath "dist/Aether_Term_Setup_$version.zip"
           Compress-Archive -Path "dist/Aether Term" -DestinationPath "dist/Aether_Term_Portable_$version.zip"
+          Get-ChildItem dist -File | Format-Table Name, Length
 
-      - name: Upload portable build to release
+      - name: Keep the build (dry run)
+        if: env.TAG == ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: aether-term-build
+          path: |
+            dist/Aether_Term_Setup_*.exe
+            dist/Aether_Term_Setup_*.zip
+            dist/Aether_Term_Portable_*.zip
+
+      - name: Attach the build to the release
+        if: env.TAG != ''
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG }}
-          files: dist/Aether_Term_Portable_*.zip
+          files: |
+            dist/Aether_Term_Setup_*.exe
+            dist/Aether_Term_Setup_*.zip
+            dist/Aether_Term_Portable_*.zip
