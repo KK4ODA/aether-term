@@ -22,7 +22,7 @@ import threading
 import time
 from typing import Optional
 
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, Qt, pyqtSignal
 
 log = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ WATCHDOG_TIMEOUT = 90.0
 
 
 class PTTController(QObject):
-    """Bridges VARA HF PTT events to OmniRig radio control.
+    """Bridges VARA HF PTT events to OmniRig, Hamlib or FLrig radio control.
 
     Signals:
         ptt_changed(bool)   — emitted when PTT state changes (for GUI indicator)
@@ -53,6 +53,7 @@ class PTTController(QObject):
         self._shared_hamlib = False  # True if hamlib client is owned externally
         self._shared_flrig = False   # True if flrig client is owned externally
         self._rig_number = 1
+        self.last_error = ""        # why the last start_method() failed
         self._watchdog: Optional[threading.Timer] = None
         self._lock = threading.Lock()
         # Radio keying runs on one worker thread, in the order the modem
@@ -80,6 +81,7 @@ class PTTController(QObject):
             from vara.omnirig import OmniRigClient
             self._omnirig = OmniRigClient(rig_number=rig_number)
             self._omnirig.start()
+            self._backend = "omnirig"
             self._enabled = True
             log.info(f"PTT controller started (OmniRig Rig{rig_number})")
             return True
@@ -92,6 +94,35 @@ class PTTController(QObject):
             log.error(f"OmniRig start failed: {e}")
             self.ptt_error.emit(str(e))
             return False
+
+    def start_method(self, method: str, config) -> bool:
+        """Start the backend for an ``hf_ptt_method`` setting.
+
+        Returns True when the radio can be keyed, False when the method's
+        backend is unavailable (``ptt_error`` says why).  A controller left
+        running from an earlier call is stopped first.
+        """
+        from config import PTT_FLRIG, PTT_HAMLIB, PTT_OMNIRIG
+        if self._enabled:
+            self.stop()
+        self.last_error = ""
+        errors: list[str] = []
+        self.ptt_error.connect(errors.append, Qt.ConnectionType.DirectConnection)
+        try:
+            if method == PTT_OMNIRIG:
+                ok = self.start(rig_number=config.get("omnirig_rig_number", 1))
+            elif method == PTT_HAMLIB:
+                ok = self.start_hamlib(config)
+            elif method == PTT_FLRIG:
+                ok = self.start_flrig(config)
+            else:
+                self.ptt_error.emit(f"Unknown PTT method: {method}")
+                ok = False
+        finally:
+            self.ptt_error.disconnect(errors.append)
+        if not ok:
+            self.last_error = errors[-1] if errors else f"{method} unavailable"
+        return ok
 
     def start_hamlib(self, config) -> bool:
         """Connect to Hamlib rigctld for PTT control.

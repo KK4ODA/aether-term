@@ -15,6 +15,8 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 
+from config import PTT_FLRIG, PTT_HAMLIB, PTT_METHODS, PTT_OMNIRIG, PTT_VOX
+from gui.hamlib_settings import HamlibSettingsGroup
 from gui.theme import hint_style, info_style, settings_scroll_style
 
 log = logging.getLogger(__name__)
@@ -359,27 +361,45 @@ class SettingsDialog(QDialog):
         layout.addWidget(self.aether_modem_group)
 
         # PTT (HF only — FM handles PTT internally)
-        self.ptt_group = QGroupBox("HF PTT Control (OmniRig)")
+        self.ptt_group = QGroupBox("HF PTT Control")
         ptt_form = QFormLayout(self.ptt_group)
+        self.ptt_form = ptt_form
         ptt_info = QLabel(
             "VARA FM handles PTT internally. For VARA HF (and Aether HF\n"
-            "set to 'host program' keying), PTT is controlled via OmniRig\n"
-            "(requires OmniRig + pywin32). Set to 'None' if your radio uses VOX."
+            "set to 'host program' keying), Aether Term keys the radio\n"
+            "through OmniRig, Hamlib rigctld or FLrig. Choose 'None (VOX)'\n"
+            "if your radio keys itself on audio. Connect stops if the\n"
+            "chosen method can't reach the radio."
         )
         ptt_info.setStyleSheet(info_style("0 0 6px 0"))
         ptt_form.addRow(ptt_info)
         self.hf_ptt_method = QComboBox()
-        self.hf_ptt_method.addItems(["None (VOX)", "OmniRig"])
+        self.hf_ptt_method.addItems(PTT_METHODS)
         self.hf_ptt_method.setToolTip(
             "PTT control method for VARA HF / host-keyed Aether HF.\n"
             "None (VOX) = radio handles PTT automatically.\n"
-            "OmniRig = software PTT via OmniRig COM server."
+            "OmniRig = OmniRig COM server (Windows, needs pywin32).\n"
+            "Hamlib (rigctld) = Hamlib's rigctld, launched by Aether Term or already running.\n"
+            "FLrig = FLrig's XML-RPC server (FLrig must be running)."
         )
         ptt_form.addRow("HF PTT Method:", self.hf_ptt_method)
         self.omnirig_rig_spin = QSpinBox()
         self.omnirig_rig_spin.setRange(1, 2)
         self.omnirig_rig_spin.setToolTip("OmniRig rig number (1 or 2).\nSelect which OmniRig rig to use for PTT.")
         ptt_form.addRow("OmniRig Rig Number:", self.omnirig_rig_spin)
+        self.flrig_host = QLineEdit()
+        self.flrig_host.setPlaceholderText("127.0.0.1")
+        self.flrig_host.setToolTip("Address of the computer running FLrig.\nUsually 127.0.0.1 for local.")
+        ptt_form.addRow("FLrig Host:", self.flrig_host)
+        self.flrig_port = QSpinBox()
+        self.flrig_port.setRange(1, 65535)
+        self.flrig_port.setToolTip("FLrig XML-RPC port (default: 12345).")
+        ptt_form.addRow("FLrig Port:", self.flrig_port)
+        self.hamlib_group = HamlibSettingsGroup(self.config, parent=self)
+        self.hamlib_group.setTitle("Hamlib (rigctld)")
+        ptt_form.addRow(self.hamlib_group)
+        self.hf_ptt_method.currentTextChanged.connect(self._update_ptt_rows)
+        self._update_ptt_rows()
         layout.addWidget(self.ptt_group)
 
         # Soundmodem (AGWPE) settings
@@ -549,6 +569,14 @@ class SettingsDialog(QDialog):
         self.hf_auto_launch.setEnabled(True)
         self.aether_auto_launch.setEnabled(True)
 
+    def _update_ptt_rows(self):
+        """Show only the settings of the chosen PTT method."""
+        method = self.hf_ptt_method.currentText()
+        self.ptt_form.setRowVisible(self.omnirig_rig_spin, method == PTT_OMNIRIG)
+        self.ptt_form.setRowVisible(self.flrig_host, method == PTT_FLRIG)
+        self.ptt_form.setRowVisible(self.flrig_port, method == PTT_FLRIG)
+        self.ptt_form.setRowVisible(self.hamlib_group, method == PTT_HAMLIB)
+
     # ── Load / Save ────────────────────────────────────────────────
 
     def _load_values(self):
@@ -609,11 +637,14 @@ class SettingsDialog(QDialog):
         self.aether_auto_launch.setChecked(c.get("aether_auto_launch", False))
         self.aether_exe_path.setText(c.get("aether_exe_path", ""))
 
-        ptt = c.get("hf_ptt_method", "None (VOX)")
+        ptt = c.get("hf_ptt_method", PTT_VOX)
         idx = self.hf_ptt_method.findText(ptt)
         if idx >= 0:
             self.hf_ptt_method.setCurrentIndex(idx)
         self.omnirig_rig_spin.setValue(c.get("omnirig_rig_number", 1))
+        self.flrig_host.setText(c.get("flrig_host", "127.0.0.1"))
+        self.flrig_port.setValue(c.get("flrig_port", 12345))
+        self.hamlib_group.load_values()
 
         self.agwpe_host.setText(c.get("soundmodem_host", "127.0.0.1"))
         self.agwpe_port.setValue(c.get("soundmodem_port", 8000))
@@ -681,6 +712,9 @@ class SettingsDialog(QDialog):
 
         c.set("hf_ptt_method", self.hf_ptt_method.currentText())
         c.set("omnirig_rig_number", self.omnirig_rig_spin.value())
+        c.set("flrig_host", self.flrig_host.text().strip() or "127.0.0.1")
+        c.set("flrig_port", self.flrig_port.value())
+        self.hamlib_group.save_values()
 
         c.set("soundmodem_host", self.agwpe_host.text())
         c.set("soundmodem_port", self.agwpe_port.value())

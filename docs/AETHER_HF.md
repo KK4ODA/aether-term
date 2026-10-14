@@ -54,11 +54,11 @@ On **Connect** in Aether HF mode:
 ## Keying the radio
 
 Aether HF normally keys the radio itself, and its regulatory check judges every transmission
-at the dial before keying. In that setup Aether Term does **not** start OmniRig PTT.
+at the dial before keying. In that setup Aether Term does **not** start its own PTT.
 
 If Aether HF's Setup step 2 is set to **host program**, tick *Aether HF keying is "host
 program"* in Aether Term. Aether Term then keys the radio on `PTT ON` with the HF PTT method
-(OmniRig), the same as for VARA HF. Aether HF's rules check is off in that mode, so the
+(OmniRig, Hamlib rigctld or FLrig), the same as for VARA HF. Aether HF's rules check is off in that mode, so the
 operator checks every transmission.
 
 ## Auto-launch

@@ -23,7 +23,7 @@ from PyQt6.QtGui import QAction, QFont, QColor, QDesktopServices
 from PyQt6.QtCore import Qt, QRect, QTimer, QUrl, pyqtSlot
 
 from config import (Config, APP_NAME, APP_VERSION, MODE_VARA_FM,
-                    MODE_VARA_HF, MODE_AETHER_HF, MODE_AGWPE)
+                    MODE_VARA_HF, MODE_AETHER_HF, MODE_AGWPE, PTT_OMNIRIG, PTT_VOX)
 from aether.control import (AetherMonitor, AetherQuery, AetherStatus,
                             find_aether_exe, AETHER_RELEASES_URL,
                             AETHER_HOST_GUIDE_URL)
@@ -565,6 +565,8 @@ class MainWindow(QMainWindow):
         """Open the modem link and start the call (after any preflight)."""
         mode = self.config.mode
         is_agwpe = (mode == MODE_AGWPE)
+        if not self._start_host_ptt():
+            return
 
         # Store target and digipeater path for later use
         self._target = target
@@ -611,17 +613,31 @@ class MainWindow(QMainWindow):
                 f"{mode} modem: {host}:{cmd_port}/{data_port}")
             self.modem.connect_to_modem(host, cmd_port, data_port)
 
-        # Start OmniRig PTT when this program keys the radio (VARA HF, or
-        # Aether HF set to "host program" keying)
-        if self.config.needs_host_ptt and self.config.get("hf_ptt_method") == "OmniRig":
-            rig_num = self.config.get("omnirig_rig_number", 1)
-            self.terminal.display.append_system(
-                f"Starting OmniRig PTT (Rig {rig_num})...")
-            if self.ptt.start(rig_number=rig_num):
-                self.terminal.display.append_success("OmniRig PTT connected")
-            else:
-                self.terminal.display.append_warning(
-                    "OmniRig PTT not available — radio must be in VOX mode")
+    def _start_host_ptt(self) -> bool:
+        """Start radio keying when this program keys the radio (VARA HF, or
+        Aether HF set to "host program" keying).
+
+        False, after telling the user, when the chosen PTT method can't
+        reach the radio: the call would go out with the radio never keyed.
+        """
+        if not self.config.needs_host_ptt:
+            return True
+        method = self.config.get("hf_ptt_method", PTT_VOX)
+        if method == PTT_VOX:
+            return True
+        self.terminal.display.append_system(f"Starting {method} PTT...")
+        if self.ptt.start_method(method, self.config):
+            self.terminal.display.append_success(f"{method} PTT connected")
+            return True
+        self.terminal.display.append_error(
+            f"Connect stopped: {method} PTT can't key the radio")
+        QMessageBox.warning(
+            self, "PTT Unavailable",
+            f"{method} PTT can't key the radio:\n\n{self.ptt.last_error}\n\n"
+            f"Start {method}, or choose another method in Settings → Modem "
+            "Configuration → HF PTT Control. Choose \"None (VOX)\" if the "
+            "radio keys itself on audio.")
+        return False
 
     @pyqtSlot()
     def _on_modem_connected(self):
@@ -2070,11 +2086,13 @@ class MainWindow(QMainWindow):
             self.terminal.display.append_text(
                 f"  Recent stations: {', '.join(history)}\n\n", "dim")
 
-        # Check OmniRig availability (needed for HF PTT)
+        # Check OmniRig availability (when it is the HF PTT method)
         self._check_omnirig()
 
     def _check_omnirig(self):
-        """Check OmniRig availability at startup and display status."""
+        """Check OmniRig availability at startup when it is the PTT method."""
+        if self.config.get("hf_ptt_method") != PTT_OMNIRIG:
+            return
         try:
             import win32com.client
             import pythoncom
