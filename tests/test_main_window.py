@@ -599,3 +599,14 @@ def test_max_retries_setting_reaches_the_modem(qapp, win, monkeypatch):
     win._on_connect()
     assert pump(qapp, until=lambda: tries, timeout=5)
     assert tries == [2]
+
+
+def test_macro_buttons_are_built_once_and_rebuilt(qapp, win):
+    labels = [b.text() for b in win.macro_buttons]
+    assert labels == [m["label"] for m in win.config.get_macros()]
+    win.macro_buttons[0].click()                 # not connected: refused, said so
+    assert "Not connected — command not sent." in text(win)
+    win.config.set_macros([{"label": "Mine", "command": "L"}])
+    win._refresh_macros()
+    assert [b.text() for b in win.macro_buttons] == ["Mine"]
+    assert win.macro_frame.layout().count() == 3  # "Quick:", Mine, stretch

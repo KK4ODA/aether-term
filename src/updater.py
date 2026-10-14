@@ -251,8 +251,6 @@ class Updater(QObject):
         except Exception as e:
             result.error = f"Unexpected error: {e}"
             log.error("Update check error", exc_info=True)
-
-        self._last_check = result
         return result
 
     def _check_release(self) -> UpdateCheckResult:

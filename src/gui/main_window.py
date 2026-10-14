@@ -371,15 +371,7 @@ class MainWindow(QMainWindow):
         macro_layout.addWidget(lbl)
 
         self.macro_buttons = []
-        for macro in self.config.get_macros():
-            btn = QPushButton(macro.get("label", ""))
-            btn.setStyleSheet(self._MACRO_BTN_STYLE)
-            cmd = macro.get("command", "")
-            btn.clicked.connect(lambda checked, c=cmd: self._send_macro(c))
-            macro_layout.addWidget(btn)
-            self.macro_buttons.append(btn)
-
-        macro_layout.addStretch()
+        self._refresh_macros()
         central_layout.addWidget(self.macro_frame)
 
         # S/N graph goes below macros
@@ -1164,9 +1156,6 @@ class MainWindow(QMainWindow):
 
     # ── Macros ─────────────────────────────────────────────────────
 
-    def _send_macro(self, command: str):
-        self._send_text(command)
-
     def _refresh_macros(self):
         """Rebuild macro buttons from config."""
         for btn in self.macro_buttons:
@@ -1184,7 +1173,7 @@ class MainWindow(QMainWindow):
             btn = QPushButton(macro.get("label", ""))
             btn.setStyleSheet(self._MACRO_BTN_STYLE)
             cmd = macro.get("command", "")
-            btn.clicked.connect(lambda checked, c=cmd: self._send_macro(c))
+            btn.clicked.connect(lambda _checked, c=cmd: self._send_text(c))
             layout.addWidget(btn)
             self.macro_buttons.append(btn)
         layout.addStretch()
