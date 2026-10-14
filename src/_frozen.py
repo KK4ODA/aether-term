@@ -12,7 +12,6 @@ Usage:
 """
 
 import sys
-import os
 from pathlib import Path
 
 # True when running as a PyInstaller bundle

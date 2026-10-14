@@ -9,7 +9,7 @@ import os
 import shutil
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 log = logging.getLogger(__name__)
 

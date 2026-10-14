@@ -7,7 +7,6 @@ open-source Aether HF modem, and AGWPE packet TNCs.
 """
 
 import sys
-import os
 import logging
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
@@ -100,7 +99,6 @@ def main():
 
     try:
         from PyQt6.QtWidgets import QApplication
-        from PyQt6.QtCore import Qt
     except ImportError:
         print("\n[ERROR] PyQt6 is not installed.")
         print("  Run:  python -m pip install PyQt6\n")

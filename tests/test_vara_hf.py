@@ -5,7 +5,6 @@ on PTT ON, unkey it on PTT OFF in the same order, and never leave it keyed
 when a call ends, fails, or the modem disappears.
 """
 
-import threading
 import time
 
 import pytest

@@ -25,7 +25,6 @@ class AGWPEModem(QObject):
     # Signals — same names and types as VARAModem
     state_changed = pyqtSignal(object)        # ConnectionState
     data_received = pyqtSignal(str)            # decoded text from BBS
-    raw_data_received = pyqtSignal(bytes)      # raw bytes
     command_event = pyqtSignal(str)            # protocol events
     sn_report = pyqtSignal(str)                # not used for AGWPE
     error_signal = pyqtSignal(str)             # error message
@@ -154,13 +153,6 @@ class AGWPEModem(QObject):
         else:
             log.warning(f"AGWPE data not sent (no link): {text[:80]!r}")
 
-    def send_data_bytes(self, data: bytes):
-        """Send raw bytes over the AX.25 connection."""
-        if self._client and self._rf_connected:
-            self._client.send_connected_data(
-                self._my_call, self._target, data,
-            )
-
     def disconnect_from_modem(self):
         """Close the entire AGWPE TCP connection."""
         if self._client:
@@ -190,7 +182,6 @@ class AGWPEModem(QObject):
             # Data from remote station
             text = frame.data.decode("utf-8", errors="replace")
             self.data_received.emit(text)
-            self.raw_data_received.emit(frame.data)
 
         elif frame.data_kind == "d":
             # Remote station disconnected
@@ -199,8 +190,3 @@ class AGWPEModem(QObject):
             self.rf_disconnected.emit()
             self.command_event.emit("DISCONNECTED")
             log.info("AGWPE RF session disconnected")
-
-        elif frame.data_kind == "g":
-            # Port info response
-            info = frame.data.decode("utf-8", errors="replace")
-            self.command_event.emit(f"Port info: {info}")

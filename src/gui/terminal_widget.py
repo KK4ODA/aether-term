@@ -8,13 +8,11 @@ plus a single-line command input with history (up/down arrows).
 import logging
 from typing import List
 
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QTextEdit, QLineEdit,
-                              QMenu, QApplication)
-from PyQt6.QtGui import (QFont, QFontDatabase, QTextCursor, QColor,
-                          QAction, QTextCharFormat)
-from PyQt6.QtCore import pyqtSignal, Qt, QTimer
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTextEdit, QLineEdit, QMenu
+from PyQt6.QtGui import QFont, QFontDatabase, QTextCursor, QAction, QTextCharFormat
+from PyQt6.QtCore import pyqtSignal, Qt
 
-from gui.theme import C, QCOLORS, terminal_stylesheet, command_input_stylesheet
+from gui.theme import QCOLORS, terminal_stylesheet, command_input_stylesheet
 
 log = logging.getLogger(__name__)
 
@@ -219,12 +217,6 @@ class CommandInput(QLineEdit):
             return
 
         self.setText(self._history[self._history_pos])
-
-    def set_history(self, history: List[str]):
-        self._history = list(history)
-
-    def get_history(self) -> List[str]:
-        return list(self._history)
 
 
 class TerminalWidget(QWidget):

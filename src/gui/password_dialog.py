@@ -10,7 +10,7 @@ import logging
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
     QPushButton, QHeaderView, QLabel, QLineEdit, QComboBox,
-    QMessageBox, QDialogButtonBox, QFormLayout, QGroupBox, QCheckBox,
+    QMessageBox, QDialogButtonBox, QFormLayout, QCheckBox,
 )
 from PyQt6.QtCore import Qt
 

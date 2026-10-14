@@ -22,7 +22,6 @@ from vara.connection import ConnectionState
 log = logging.getLogger(__name__)
 
 CONNECT_TIMEOUT = 10  # seconds
-CMD_ACK_TIMEOUT = 5   # seconds to wait for OK after a command
 
 # VARA FM routes through at most two digipeaters
 # ("CONNECT Source Destination VIA Digi1 Digi2<cr>" in the VARA TNC
@@ -73,7 +72,6 @@ class VARAModem(QObject):
 
     state_changed = pyqtSignal(object)        # ConnectionState
     data_received = pyqtSignal(str)            # decoded text from BBS
-    raw_data_received = pyqtSignal(bytes)      # raw bytes for any binary handling
     command_event = pyqtSignal(str)            # raw VARA event
     sn_report = pyqtSignal(str)                # S/N dB value
     error_signal = pyqtSignal(str)             # error message
@@ -94,8 +92,6 @@ class VARAModem(QObject):
         self._state = ConnectionState.DISCONNECTED
         self._stop = threading.Event()
         self._cmd_buf = ""
-        self._lock = threading.Lock()
-        self._remote_call: Optional[str] = None
         self._init_cleanup = False       # True while sending cleanup DISCONNECT
         self._init_ack: Optional[threading.Event] = None  # set when VARA acks cleanup
         self._last_cmd: Optional[str] = None  # most recent command sent (for WRONG correlation)
@@ -104,10 +100,6 @@ class VARAModem(QObject):
     @property
     def state(self) -> ConnectionState:
         return self._state
-
-    @property
-    def remote_call(self) -> Optional[str]:
-        return self._remote_call
 
     def _set_state(self, new_state: ConnectionState):
         self._state = new_state
@@ -265,15 +257,6 @@ class VARAModem(QObject):
             log.error(f"Data send error: {e}")
             self.error_signal.emit(f"Data send error: {e}")
 
-    def send_data_bytes(self, data: bytes):
-        """Send raw bytes on the data socket."""
-        if self._data_sock is None:
-            return
-        try:
-            self._data_sock.sendall(data)
-        except OSError as e:
-            log.error(f"Data send error: {e}")
-
     # ── Disconnect from modem ──────────────────────────────────────
 
     def disconnect_from_modem(self):
@@ -287,7 +270,6 @@ class VARAModem(QObject):
             except Exception:
                 pass
         self._close_sockets()
-        self._remote_call = None
         self._set_state(ConnectionState.DISCONNECTED)
 
     def _close_sockets(self):
@@ -349,7 +331,6 @@ class VARAModem(QObject):
                 data = self._data_sock.recv(4096)
                 if not data:
                     break
-                self.raw_data_received.emit(data)
                 try:
                     text = data.decode("utf-8", errors="replace")
                     self.data_received.emit(text)
@@ -396,13 +377,11 @@ class VARAModem(QObject):
             self.connected_via = rest[:MAX_DIGIPEATERS]
             if bw:
                 self.session_bandwidth.emit(bw)
-            self._remote_call = call1  # default; main window may override
             self._set_state(ConnectionState.CONNECTED)
             self.rf_connected.emit(f"{call1} {call2}".strip())
             log.info(f"RF session connected: {call1} {call2}")
 
         elif upper.startswith("DISCONNECTED"):
-            self._remote_call = None
             self.connected_via = []
             self._set_state(ConnectionState.MODEM_CONNECTED)
             self.rf_disconnected.emit()
@@ -464,6 +443,5 @@ class VARAModem(QObject):
         """Handle TCP connection loss to the modem."""
         log.error("Lost TCP connection to modem")
         self._close_sockets()
-        self._remote_call = None
         self._set_state(ConnectionState.DISCONNECTED)
         self.error_signal.emit("Lost connection to modem")

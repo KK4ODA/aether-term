@@ -13,7 +13,6 @@ from PyQt6.QtWidgets import (
     QPushButton, QLabel, QGroupBox, QFileDialog, QRadioButton,
     QButtonGroup, QDialogButtonBox, QScrollArea, QFrame,
 )
-from PyQt6.QtCore import Qt
 
 from config import PTT_FLRIG, PTT_HAMLIB, PTT_METHODS, PTT_OMNIRIG, PTT_VOX
 from gui.hamlib_settings import HamlibSettingsGroup

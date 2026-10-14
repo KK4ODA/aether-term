@@ -32,3 +32,4 @@ desktop.ini
 # Aether Term runtime
 *.log
 start_term.bat
+.coverage

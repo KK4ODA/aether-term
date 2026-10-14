@@ -227,13 +227,6 @@ class AGWPEClient:
             call_from=my_call, call_to=remote_call, data=data,
         ))
 
-    def request_port_info(self) -> bool:
-        """Request port information ('G' frame)."""
-        return self.send_frame(AGWPEFrame(
-            port=0, data_kind="G", pid=0,
-            call_from="", call_to="", data=b"",
-        ))
-
     # ── Background reader ─────────────────────────────────────────────
 
     def _reader_loop(self):

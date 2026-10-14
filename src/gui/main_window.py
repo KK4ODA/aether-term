@@ -16,10 +16,10 @@ from typing import Optional
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QComboBox, QStatusBar,
-    QMenuBar, QMenu, QFrame, QMessageBox, QInputDialog,
+    QFrame, QMessageBox, QInputDialog,
     QStyle, QStyleOptionComboBox,
 )
-from PyQt6.QtGui import QAction, QFont, QColor, QDesktopServices
+from PyQt6.QtGui import QAction, QDesktopServices
 from PyQt6.QtCore import Qt, QRect, QTimer, QUrl, pyqtSlot
 
 from config import (Config, APP_NAME, APP_VERSION, MODE_VARA_FM,
@@ -115,7 +115,6 @@ class MainWindow(QMainWindow):
         # Aether HF control-API status monitor (only runs in Aether HF mode)
         self.aether = AetherMonitor(self)
         self.aether_query = AetherQuery(self)   # one-shot checks, off the GUI thread
-        self._aether_status: Optional[AetherStatus] = None
         self._preflight_pending = False
 
         self.setWindowTitle(f"{APP_NAME} — {APP_TAGLINE}")
@@ -451,7 +450,6 @@ class MainWindow(QMainWindow):
         self._chat_label.hide()
         self.status_bar.addPermanentWidget(self._chat_label)
         self._chat_room = ""
-        self._detected_transport = ""
 
     @staticmethod
     def _sep() -> QLabel:
@@ -749,7 +747,6 @@ class MainWindow(QMainWindow):
         self.sn_graph.clear_data()
         self._chat_room = ""
         self._chat_label.hide()
-        self._detected_transport = ""
         # Release PTT (HF safety)
         if self.ptt.is_enabled:
             self.ptt.stop()
@@ -937,7 +934,6 @@ class MainWindow(QMainWindow):
         # Send auth response if needed — delay briefly to let VARA FM
         # finish receiving before we transmit (half-duplex turnaround)
         if action.send_response:
-            from PyQt6.QtCore import QTimer
             response = action.send_response
             QTimer.singleShot(1500, lambda: self._send_auth_response(response))
 
@@ -1066,9 +1062,6 @@ class MainWindow(QMainWindow):
         state = self.modem.state
         connected = state == ConnectionState.CONNECTED
         disconnected = state == ConnectionState.DISCONNECTED
-        in_progress = state in (ConnectionState.CONNECTING,
-                                ConnectionState.INITIALIZING,
-                                ConnectionState.MODEM_CONNECTED)
 
         self.connect_btn.setEnabled(disconnected and not self._preflight_pending)
         self.disconnect_btn.setEnabled(not disconnected)
@@ -1423,7 +1416,6 @@ class MainWindow(QMainWindow):
             self.config.set("target_history", history)
             self.config.save()
             log.info(f"Target history saved: {history}")
-            log.info(f"Config path: {self.config._path}")
 
             # Refresh the combo box
             self.target_input.blockSignals(True)
@@ -1433,9 +1425,6 @@ class MainWindow(QMainWindow):
                 self.target_input.addItem(call)
             self.target_input.setCurrentText(current)
             self.target_input.blockSignals(False)
-
-            count = self.target_input.count()
-            log.info(f"ComboBox now has {count} items")
         except Exception as e:
             log.error(f"Failed to save target history: {e}")
             import traceback
@@ -1783,14 +1772,12 @@ class MainWindow(QMainWindow):
             self.aether_label.show()
         else:
             self.aether.stop()
-            self._aether_status = None
             self.aether_label.hide()
 
     @pyqtSlot(object)
     def _on_aether_status(self, st: AetherStatus):
         if not self.config.is_aether:
             return
-        self._aether_status = st
         self.aether_label.setText(st.summary)
         if not st.reachable:
             color = C["text_dim"]
@@ -1943,9 +1930,8 @@ class MainWindow(QMainWindow):
     def _handle_transport_response(self, line: str) -> bool:
         """Check if a line is a ;TRANSPORT response.  Returns True if handled."""
         if line.startswith(";TRANSPORT "):
-            transport = line[11:].strip()
-            self._detected_transport = transport
-            self.terminal.display.append_system(f"BBS transport: {transport}")
+            self.terminal.display.append_system(
+                f"BBS transport: {line[11:].strip()}")
             return True
         return False
 

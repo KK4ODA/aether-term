@@ -10,7 +10,6 @@ import json
 import base64
 import hashlib
 import logging
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional

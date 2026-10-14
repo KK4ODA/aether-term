@@ -22,12 +22,11 @@ import logging
 import os
 from typing import Optional
 
-from PyQt6.QtCore import Qt, pyqtSignal, QThread
+from PyQt6.QtCore import pyqtSignal, QThread
 from PyQt6.QtWidgets import (
     QGroupBox, QFormLayout, QHBoxLayout, QVBoxLayout,
     QLineEdit, QSpinBox, QComboBox, QCheckBox, QPushButton,
-    QLabel, QFileDialog, QDialog, QProgressBar, QDialogButtonBox,
-    QTextEdit,
+    QLabel, QFileDialog, QDialog, QProgressBar, QTextEdit,
 )
 
 log = logging.getLogger(__name__)
