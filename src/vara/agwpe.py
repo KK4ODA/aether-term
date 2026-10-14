@@ -49,6 +49,22 @@ def _decode_call(raw: bytes) -> str:
     return raw.split(b"\x00", 1)[0].decode("ascii", errors="replace")
 
 
+# Monitoring frames (heard traffic): logged at DEBUG so they can't flood the log
+_MONITOR_KINDS = set("IUSTK")
+
+
+def describe_frame(frame: AGWPEFrame) -> str:
+    """One log line for a frame: kind, port, calls, PID, length and data."""
+    return (f"'{frame.data_kind}' port={frame.port} {frame.call_from or '-'}"
+            f" -> {frame.call_to or '-'} pid=0x{frame.pid:02X}"
+            f" len={len(frame.data)} {frame.data[:80]!r}")
+
+
+def _log_frame(direction: str, frame: AGWPEFrame):
+    level = logging.DEBUG if frame.data_kind in _MONITOR_KINDS else logging.INFO
+    log.log(level, f"AGWPE {direction} {describe_frame(frame)}")
+
+
 def encode_frame(frame: AGWPEFrame) -> bytes:
     """Encode an AGWPEFrame into bytes for transmission."""
     header = struct.pack(
@@ -150,6 +166,7 @@ class AGWPEClient:
         with self._write_lock:
             try:
                 self._sock.sendall(raw)
+                _log_frame("TX", frame)
                 return True
             except OSError as e:
                 log.error(f"AGWPE send error: {e}")
@@ -233,6 +250,7 @@ class AGWPEClient:
                     if data is None:
                         break
                 frame = decode_frame(header, data)
+                _log_frame("RX", frame)
                 if self._on_frame:
                     try:
                         self._on_frame(frame)

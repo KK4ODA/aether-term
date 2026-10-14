@@ -5,6 +5,38 @@ Format: [version] — YYYY-MM-DD, then a bulleted list of changes.
 
 ---
 
+## [1.1.6] — 2026-10-14
+
+### Added
+
+- **FLrig and Hamlib PTT.** Settings → Modem Configuration → HF PTT Control
+  now offers *Hamlib (rigctld)* and *FLrig* next to OmniRig and VOX, for
+  VARA HF and host-keyed Aether HF. Each method shows only its own
+  settings: OmniRig's rig number, FLrig's host and port, or the Hamlib
+  panel (rig model, serial port, rigctld address, auto-launch, and the
+  Hamlib download). The drivers were already in Aether Term but couldn't be
+  selected. *(gui/settings_dialog.py, vara/ptt.py, config.py)*
+
+### Changed
+
+- **Connect stops when PTT can't reach the radio.** It used to go ahead with
+  a warning, and the call went out with the radio never keyed. Now, unless
+  the PTT method is *None (VOX)*, Aether Term starts PTT before opening the
+  modem link. If that fails, the modem is never called, and a dialog says
+  why (for example "Cannot connect to FLrig … Is FLrig running?") and how
+  to fix it. VARA FM and Soundmodem are unaffected: they key the radio
+  themselves. *(gui/main_window.py)*
+- The startup "OmniRig not running" notice appears only when OmniRig is
+  the PTT method. *(gui/main_window.py)*
+- **Soundmodem (AGWPE) traffic is logged.** Every frame Aether Term sends to
+  or receives from Soundmodem goes into `aether-term.log` (kind, port,
+  calls, PID, length, the first 80 bytes). Heard-traffic monitor frames are
+  logged at debug level only. This is for a Soundmodem session through a
+  digipeater that connected but passed no data: the log will show whether
+  the typed lines reached Soundmodem. *(vara/agwpe.py, vara/agwpe_modem.py)*
+
+---
+
 ## [1.1.5] — 2026-10-14
 
 ### Fixed

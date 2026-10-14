@@ -26,6 +26,13 @@ MODE_VARA_HF = "VARA HF"
 MODE_AETHER_HF = "Aether HF"
 MODE_AGWPE = "AGWPE"
 
+# HF PTT methods (the ``hf_ptt_method`` setting), as shown in Settings
+PTT_VOX = "None (VOX)"
+PTT_OMNIRIG = "OmniRig"
+PTT_HAMLIB = "Hamlib (rigctld)"
+PTT_FLRIG = "FLrig"
+PTT_METHODS = (PTT_VOX, PTT_OMNIRIG, PTT_HAMLIB, PTT_FLRIG)
+
 
 def _read_version() -> str:
     """Read version from version.txt at the project root.
@@ -137,8 +144,10 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "soundmodem_exe_path": "",
 
     # PTT (HF only — FM handles PTT internally)
-    "hf_ptt_method": "OmniRig",  # "None (VOX)" or "OmniRig"
+    "hf_ptt_method": "OmniRig",  # one of PTT_METHODS
     "omnirig_rig_number": 1,  # OmniRig Rig 1 or 2
+    "flrig_host": "127.0.0.1",
+    "flrig_port": 12345,
 
     # Terminal appearance
     "font_family": "Consolas",

@@ -49,3 +49,32 @@ def test_decode_reads_a_spec_header():
     f = decode_frame(header, b"abc")
     assert (f.port, f.data_kind, f.pid) == (0, "C", 0xF0)
     assert (f.call_from, f.call_to, f.data) == ("W1AW-5", "KK4ODA", b"abc")
+
+
+def test_frames_are_logged_both_ways(caplog):
+    """Every frame to and from the TNC is in the log, so an on-air report
+    shows what Aether Term actually handed Soundmodem."""
+    import logging
+    import time
+    from vara.agwpe import AGWPEClient
+    from fake_agwpe import FakeAGWPE
+
+    fake = FakeAGWPE().start()
+    got = []
+    client = AGWPEClient(port=fake.port, on_frame=got.append)
+    caplog.set_level(logging.INFO, logger="vara.agwpe")
+    try:
+        assert client.connect()
+        client.connect_station_via("KK4ODA-7", "KE4QCM-7", ["WD5EMA-4"])
+        client.send_connected_data("KK4ODA-7", "KE4QCM-7", b"ARES\r")
+        end = time.time() + 5
+        while len(got) < 1 and time.time() < end:
+            time.sleep(0.02)
+        assert got
+    finally:
+        client.disconnect()
+        fake.stop()
+    text = caplog.text
+    assert "AGWPE TX 'v' port=0 KK4ODA-7 -> KE4QCM-7" in text
+    assert "AGWPE TX 'D' port=0 KK4ODA-7 -> KE4QCM-7 pid=0xF0 len=5 b'ARES\\r'" in text
+    assert "AGWPE RX 'C' port=0 KE4QCM-7 -> KK4ODA-7" in text

@@ -18,7 +18,8 @@ Aether Term is a PyQt6 desktop application for connecting to amateur radio BBS s
   keying or sound card fault), modem identity check, link speed and session bandwidth
 - Automatic HMAC-SHA256 authentication — passwords never go over RF
 - Encrypted Winlink registration (WLREG) for checking email via BBS
-- OmniRig PTT for VARA HF (and Aether HF set to host-program keying)
+- PTT for VARA HF (and Aether HF set to host-program keying) through OmniRig, Hamlib
+  rigctld or FLrig; Connect stops if the chosen method can't reach the radio
 - Mode switching with modem auto-launch (VARA FM, VARA HF, Aether HF, Soundmodem)
 - Connection profiles (per-profile operator, tactical address, mode and bandwidth) and
   target history
@@ -66,7 +67,7 @@ software, not the signal. The BBS you call must be running Aether HF too, on the
    | Command Port | `8300` | Data port is always command + 1 |
    | Control API Port | `8515` | Read-only status; no token needed on loopback |
    | Bandwidth | `2300` | `BW2300` / `BW500` — both stations must match |
-   | Keying is "host program" | off | Turn on only if Aether HF Setup step 2 is *host program*; Aether Term then keys the radio with the PTT method below (OmniRig) |
+   | Keying is "host program" | off | Turn on only if Aether HF Setup step 2 is *host program*; Aether Term then keys the radio with the PTT method below (OmniRig, Hamlib or FLrig) |
    | Start Aether HF with Aether Term | off | Launches `aether-hf.exe`, unless Aether HF is already running |
 
    **Test Aether HF** in that panel asks the modem for its status and lists anything that needs
