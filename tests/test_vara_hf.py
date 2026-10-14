@@ -21,6 +21,9 @@ class FakeRig:
         self.is_started = True
         self.stopped = False
 
+    def start(self):
+        pass
+
     def set_ptt(self, on: bool) -> bool:
         if on and self.key_delay:
             time.sleep(self.key_delay)
@@ -38,9 +41,7 @@ class FakeRig:
 def _controller(rig):
     from vara.ptt import PTTController
     c = PTTController()
-    c._omnirig = rig
-    c._backend = "omnirig"
-    c._enabled = True
+    c.use_rig(rig, "OmniRig")
     return c
 
 
@@ -84,9 +85,25 @@ def test_stop_unkeys_and_closes_the_rig(qapp):
     rig = FakeRig()
     c = _controller(rig)
     c.on_ptt_event(True)
+    assert c.wait_idle(3)
     c.stop()
     assert rig.calls == [True, False] and rig.stopped
     assert not c.is_enabled
+
+
+def test_stop_drops_keying_still_queued(qapp):
+    """Keying queued behind a slow command is not run after stop(): the
+    radio ends unkeyed, and nothing keys it once stop() has returned."""
+    rig = FakeRig(key_delay=0.3)
+    c = _controller(rig)
+    c.on_ptt_event(True)                 # slow; running when stop() comes
+    c.on_ptt_event(False)
+    c.on_ptt_event(True)                 # would key the radio again
+    time.sleep(0.05)
+    c.stop()
+    assert rig.calls == [True, False] and rig.stopped
+    time.sleep(0.5)
+    assert rig.calls == [True, False]
 
 
 # ── VARA HF session ─────────────────────────────────────────────────────
@@ -97,19 +114,12 @@ def hf(qapp, home, aetherd, monkeypatch):
     from config import Config
     from passwords import PasswordStore
     from gui.main_window import MainWindow
-    from vara.ptt import PTTController
     import passwords
 
     monkeypatch.setattr(MainWindow, "_check_omnirig", lambda self: None)
     monkeypatch.setattr(passwords, "HAS_KEYRING", False)
     rig = FakeRig()
-
-    def fake_start(self, rig_number=1):
-        self._omnirig = rig
-        self._backend = "omnirig"
-        self._enabled = True
-        return True
-    monkeypatch.setattr(PTTController, "start", fake_start)
+    monkeypatch.setattr("vara.ptt._make_rig", lambda method, config: rig)
 
     cfg = Config()
     cfg.set("my_callsign", "KK4ODA")
