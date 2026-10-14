@@ -439,3 +439,92 @@ def test_profiles_keep_every_mode(qapp, win):
     pd = ProfileDialog(win.config, win)
     for mode in ("VARA FM", "VARA HF", "Aether HF", "AGWPE"):
         assert pd.mode_combo.findData(mode) >= 0
+
+
+# ── Modem programs follow the mode ──────────────────────────────────────
+
+@pytest.fixture
+def launches(win, tmp_path, monkeypatch):
+    """Record modem programs started and stopped instead of running them."""
+    from gui.main_window import MainWindow
+    log = []
+
+    class Proc:
+        def __init__(self, label):
+            self.label, self.pid, self.alive = label, 1, True
+
+        def poll(self):
+            return None if self.alive else 0
+
+        def wait(self, timeout=None):
+            return 0
+
+        def terminate(self):
+            self.alive = False
+            log.append(f"stop {self.label}")
+
+    def fake_start(self, exe, label):
+        log.append(f"start {label}")
+        p = Proc(label)
+        self._modem_procs.append(p)
+        return p
+    monkeypatch.setattr(MainWindow, "_start_modem_exe", fake_start)
+    monkeypatch.setattr("os.name", "posix")      # terminate(), not taskkill
+    for key, name in (("vara_fm_exe_path", "VARAFM.exe"),
+                      ("soundmodem_exe_path", "soundmodem.exe")):
+        exe = tmp_path / name
+        exe.write_text("")
+        win.config.set(key, str(exe))
+    win.config.set("soundmodem_auto_launch", True)
+    win.config.set("vara_fm_auto_launch", True)
+    return log
+
+
+def _add_profile(win, mode):
+    win.config.add_profile({"name": mode, "mode": mode,
+                            "target_callsign": "KE4QCM-7"})
+    win._refresh_profiles()
+    return len(win.config.get_profiles())        # its index in the combo
+
+
+def test_profile_switch_swaps_the_modem_program(qapp, win, launches):
+    """Choosing a profile in another mode closes the old modem program and
+    starts the new one, as the mode dropdown does."""
+    win.mode_combo.setCurrentIndex(3)            # Soundmodem
+    assert pump(qapp, until=lambda: launches == ["start Soundmodem"])
+    idx = _add_profile(win, "VARA FM")
+    win.profile_combo.setCurrentIndex(idx)
+    assert pump(qapp, until=lambda: launches[-1] == "start VARA FM")
+    assert launches == ["start Soundmodem", "stop Soundmodem", "start VARA FM"]
+    assert win.config.mode == "VARA FM"
+    assert win.mode_combo.currentText() == win.mode_combo.itemText(0)
+    assert win.target_input.currentText() == "KE4QCM-7"
+
+
+def test_profile_in_the_same_mode_leaves_the_modem_running(qapp, win, launches):
+    win.mode_combo.setCurrentIndex(3)
+    assert pump(qapp, until=lambda: launches == ["start Soundmodem"])
+    win.profile_combo.setCurrentIndex(_add_profile(win, "AGWPE"))
+    pump(qapp, 0.5)
+    assert launches == ["start Soundmodem"]
+
+
+def test_profile_connect_waits_for_a_new_modem(qapp, win, launches, monkeypatch):
+    from gui import main_window
+    monkeypatch.setattr(main_window, "MODEM_START_DELAY_MS", 600)
+    calls = []
+    monkeypatch.setattr(win, "_on_connect", lambda: calls.append(1))
+    win._connect_from_profile({"mode": "AGWPE", "target_callsign": "KE4QCM-7"})
+    pump(qapp, 0.4)
+    assert not calls                             # still waiting for Soundmodem
+    assert pump(qapp, until=lambda: calls, timeout=3)
+    assert "start Soundmodem" in launches
+
+
+def test_profiles_and_mode_are_locked_during_a_call(qapp, win):
+    win._on_connect()
+    assert pump(qapp, until=lambda: "CONNECTED to W1AW-5" in text(win), timeout=15)
+    assert not win.profile_combo.isEnabled() and not win.mode_combo.isEnabled()
+    assert not win._switch_mode("VARA FM")
+    assert win.config.mode == "Aether HF"
+    assert "Disconnect before switching" in text(win)

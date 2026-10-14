@@ -62,6 +62,10 @@ VIA_WIDTH_SAMPLE = "WD5EMA-15"     # the widest call the boxes must show
 # often mid-line, a second or more apart on a slow link.
 PARTIAL_LINE_DELAY_MS = 1000
 
+# Connecting from a profile that switched modes: time for the modem program
+# just launched to open its ports.
+MODEM_START_DELAY_MS = 5000
+
 APP_TAGLINE = "BBS Terminal Client for VARA and Aether HF"
 
 # Toolbar mode combo: (label, config value), in index order
@@ -1075,6 +1079,7 @@ class MainWindow(QMainWindow):
 
         # Lock mode switching while any connection activity is happening
         self.mode_combo.setEnabled(disconnected and not self._preflight_pending)
+        self.profile_combo.setEnabled(disconnected and not self._preflight_pending)
 
         # Sync combo selection with config (e.g. after Settings dialog)
         expected_idx = _MODE_INDEX.get(self.config.mode, 0)
@@ -1269,9 +1274,7 @@ class MainWindow(QMainWindow):
             self._set_via(self.via1_input, p.get("via1", ""))
             self._set_via(self.via2_input, p.get("via2", ""))
 
-            mode = p.get("mode", "VARA FM")
-            if mode != self.config.get("vara_mode"):
-                self.config.set("vara_mode", mode)
+            self._switch_mode(p.get("mode", "VARA FM"))
             self._apply_profile_bandwidth(p)
             fm_bw = p.get("fm_bandwidth", "WIDE")
             self.config.set("fm_bandwidth", fm_bw)
@@ -1468,9 +1471,23 @@ class MainWindow(QMainWindow):
     def _on_mode_switched(self, index: int):
         """User changed transport mode via the toolbar combo."""
         new_mode = _MODES[index][1] if 0 <= index < len(_MODES) else MODE_VARA_FM
+        self._switch_mode(new_mode)
+
+    def _switch_mode(self, new_mode: str) -> bool:
+        """Change the transport mode: close the old modem's link and
+        program, start the new one (toolbar combo and profiles alike).
+
+        Returns True if the mode changed, False if it was already
+        ``new_mode`` or a call is under way (after telling the user).
+        """
         old_mode = self.config.mode
         if new_mode == old_mode:
-            return
+            return False
+        if self.modem.state != ConnectionState.DISCONNECTED or self._preflight_pending:
+            self.terminal.display.append_warning(
+                f"Disconnect before switching to "
+                f"{_MODE_LABEL.get(new_mode, new_mode)}.")
+            return False
 
         # 1. Clean up the old modem connection (TCP sockets + state)
         self._connect_in_progress = False
@@ -1490,9 +1507,12 @@ class MainWindow(QMainWindow):
 
         self._sync_aether_monitor()
         self._update_ui_state()
+        return True
 
     def _launch_modem_processes(self):
         """Launch the modem executable matching the selected mode."""
+        if any(p.poll() is None for p in self._modem_procs):
+            return          # already started (a mode switch beat the startup launch)
         mode = self.config.mode
 
         if mode == MODE_AETHER_HF:
@@ -1651,11 +1671,28 @@ class MainWindow(QMainWindow):
         self._set_via(self.via1_input, profile.get("via1", ""))
         self._set_via(self.via2_input, profile.get("via2", ""))
         mode = profile.get("mode", "VARA FM")
-        self.config.set("vara_mode", mode)
+        switched = self._switch_mode(mode)
+        if mode != self.config.mode:
+            return                          # a call is under way
         self._apply_profile_bandwidth(profile)
         self._sync_aether_monitor()
         self._update_ui_state()
-        QTimer.singleShot(200, self._on_connect)
+        delay = 200
+        if switched and self._auto_launch_on():
+            # The modem program just launched needs a few seconds to listen
+            delay = MODEM_START_DELAY_MS
+            self.terminal.display.append_system(
+                f"Waiting {MODEM_START_DELAY_MS // 1000} s for the modem to start...")
+        QTimer.singleShot(delay, self._on_connect)
+
+    def _auto_launch_on(self) -> bool:
+        """Whether Aether Term starts the current mode's modem program."""
+        key, default = {
+            MODE_AETHER_HF: ("aether_auto_launch", False),
+            MODE_AGWPE: ("soundmodem_auto_launch", False),
+            MODE_VARA_HF: ("vara_hf_auto_launch", True),
+        }.get(self.config.mode, ("vara_fm_auto_launch", True))
+        return bool(self.config.get(key, default))
 
     def _show_about(self):
         QMessageBox.about(self, f"About {APP_NAME}",
