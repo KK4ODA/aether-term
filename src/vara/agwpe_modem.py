@@ -84,7 +84,8 @@ class AGWPEModem(QObject):
             self._set_state(ConnectionState.DISCONNECTED)
 
     def initialize_modem(self, callsign: str, is_hf: bool = False,
-                         bandwidth: int = 0, query_version: bool = False):
+                         bandwidth: int = 0, query_version: bool = False,
+                         **_unused):
         """Register callsign with the TNC.
 
         Takes the same arguments as ``VARAModem.initialize_modem``;

@@ -637,7 +637,8 @@ class MainWindow(QMainWindow):
         callsign = self._effective_callsign()
         self.modem.initialize_modem(
             callsign, self.config.is_hf_band, self.config.session_bandwidth,
-            query_version=self.config.is_aether)
+            query_version=self.config.is_aether,
+            session=self.config.vara_session)
 
     @pyqtSlot(object)
     def _on_init_complete(self, new_state):
@@ -1004,6 +1005,13 @@ class MainWindow(QMainWindow):
         if state in (ConnectionState.CONNECTED,
                      ConnectionState.DISCONNECTED):
             self._connect_in_progress = False
+        # The modem link is gone (closed, failed call cleaned up, or the
+        # modem crashed / dropped TCP): never leave the radio keyed or the
+        # rig link open waiting for a PTT OFF that cannot come.
+        if state == ConnectionState.DISCONNECTED and self.ptt.is_enabled:
+            log.info("Modem link closed — releasing PTT")
+            self.ptt.stop()
+            self.ptt_label.setText("")
         # Falling back to MODEM_CONNECTED from a call (refused, timed out,
         # CANCELPENDING, rejected CONNECT, or a session that ended) is the
         # end of that connect sequence too — unlike the INITIALIZING →
