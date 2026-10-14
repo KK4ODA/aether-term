@@ -22,6 +22,12 @@ Format: [version] — YYYY-MM-DD, then a bulleted list of changes.
   left the rig link open. Now any end of the modem link unkeys the radio
   and closes the rig link at once. *(gui/main_window.py)*
 
+- **Via boxes show the whole callsign.** In 1.1.4 the Via 1 / Via 2
+  dropdowns had only a maximum width, and the toolbar squeezed them to about
+  35 px: "None" read "one" and only two letters of a callsign were visible.
+  They now always have room for a full call with SSID (`WD5EMA-15`).
+  *(gui/main_window.py)*
+
 ### Added
 
 - **VARA HF sends `P2P SESSION`.** VARA's command reference says
@@ -31,6 +37,12 @@ Format: [version] — YYYY-MM-DD, then a bulleted list of changes.
   **Settings → Session Type** option switches to *Winlink gateway* for RMS
   calls. VARA FM, Aether HF and Soundmodem are unchanged.
   *(config.py, vara/modem.py, gui/settings_dialog.py)*
+- **Digipeaters with Soundmodem (AGWPE).** Via 1 / Via 2 now work in
+  Soundmodem mode. The call goes out as AGWPE's "connect via" frame (`v`:
+  the digipeater count, then each call), so the path is set per call from
+  Aether Term. Soundmodem's own `Digi` settings are for Soundmodem acting as
+  a digipeater, and do not route outgoing calls. VARA HF and Aether HF still
+  refuse a Via path. *(vara/agwpe.py, vara/agwpe_modem.py, gui/main_window.py)*
 - **VARA HF end-to-end tests.** A full session against the fake modem
   covers the init commands, `CONNECTED … 2300`, PTT keying and unkeying
   through a fake rig, release on disconnect, a refused call, a rejected

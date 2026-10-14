@@ -112,7 +112,7 @@ def test_vara_fm_digipeater_session(qapp, win):
 
 
 @pytest.mark.parametrize("via1,expected", [
-    ("N4XYZ-7", "only supported in VARA FM"),        # Aether HF can't digipeat
+    ("N4XYZ-7", "supported with VARA FM and Soundmodem"),   # Aether HF can't digipeat
     ("N4XYZ-99", "not a valid digipeater callsign"),
 ])
 def test_bad_digipeater_path_stops_the_call(qapp, win, monkeypatch, via1, expected):
@@ -310,6 +310,30 @@ def test_soundmodem_session(qapp, win, agwpe):
     assert agwpe.data_sent() == b"H\r"
     win._on_disconnect()
     assert pump(qapp, until=lambda: win.modem.state == ConnectionState.DISCONNECTED)
+
+
+def test_soundmodem_digipeater_session(qapp, win, agwpe):
+    """Via 1 / Via 2 in Soundmodem mode go out as an AGWPE 'v' connect;
+    Soundmodem's own Digi settings don't set the path of our calls."""
+    win.mode_combo.setCurrentIndex(3)
+    pump(qapp, 0.1)
+    win.config.set("soundmodem_port", agwpe.port)
+    win._set_via(win.via1_input, "WD5EMA-4")
+    win._on_connect()
+    assert pump(qapp, until=lambda: "CONNECTED to W1AW-5 via WD5EMA-4" in text(win),
+                timeout=15), f"frames={agwpe.kinds()!r}\n" + text(win)[-600:]
+    assert "v" in agwpe.kinds() and "C" not in agwpe.kinds()
+    assert agwpe.via == ["WD5EMA-4"]
+    assert "VARA license" not in text(win)          # that note is VARA FM's
+
+
+def test_via_boxes_fit_a_full_callsign(qapp, win):
+    """1.1.4's boxes were squeezed until "None" read "one"."""
+    win.show()
+    pump(qapp, 0.2)
+    for cb in (win.via1_input, win.via2_input):
+        need = cb.fontMetrics().horizontalAdvance("WD5EMA-15")
+        assert cb.lineEdit().width() >= need, (cb.lineEdit().width(), need)
 
 
 def test_agwpe_modem_takes_the_vara_init_arguments(qapp):

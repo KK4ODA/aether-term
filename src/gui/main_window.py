@@ -260,15 +260,15 @@ class MainWindow(QMainWindow):
         # one); the last call's choice comes back next time.
         row1.addWidget(QLabel("Via 1:"))
         self.via1_input = self._make_via_combo(
-            "First digipeater in the path (VARA FM only).\n"
+            "First digipeater in the path (VARA FM or Soundmodem).\n"
             "None for a direct connection.\n"
-            "Connecting via digipeaters needs a registered VARA license.",
+            "VARA FM needs a registered VARA license to use digipeaters.",
             self.config.get("last_via1", ""))
         row1.addWidget(self.via1_input)
 
         row1.addWidget(QLabel("Via 2:"))
         self.via2_input = self._make_via_combo(
-            "Second digipeater in the path (VARA FM only).\n"
+            "Second digipeater in the path (VARA FM or Soundmodem).\n"
             "Only needed for two-hop routes.",
             self.config.get("last_via2", ""))
         row1.addWidget(self.via2_input)
@@ -538,8 +538,8 @@ class MainWindow(QMainWindow):
     def _check_digipeaters(self) -> bool:
         """Validate the Via fields; False (after telling the user) to stop.
 
-        Only VARA FM can route through digipeaters — VARA HF, Aether HF
-        and the Soundmodem path would otherwise silently call direct.
+        VARA FM and Soundmodem (AGWPE) route through digipeaters; VARA HF
+        and Aether HF would otherwise silently call direct.
         """
         try:
             digis = parse_digipeaters(self._via_value(self.via1_input),
@@ -548,13 +548,13 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Digipeater Path", str(e))
             self.via1_input.setFocus()
             return False
-        if digis and self.config.mode != MODE_VARA_FM:
+        if digis and self.config.mode not in (MODE_VARA_FM, MODE_AGWPE):
             QMessageBox.warning(
                 self, "Digipeater Path",
-                "Digipeaters are only supported in VARA FM mode.\n\n"
-                f"Clear Via 1 / Via 2 to call direct with "
+                "Digipeaters are supported with VARA FM and Soundmodem.\n\n"
+                f"Set Via 1 / Via 2 to None to call direct with "
                 f"{_MODE_LABEL.get(self.config.mode, self.config.mode)}, "
-                "or switch to VARA FM.")
+                "or switch modes.")
             return False
         return True
 
@@ -572,7 +572,7 @@ class MainWindow(QMainWindow):
         path = f" via {', '.join(self._via)}" if self._via else ""
         self.terminal.display.append_system(
             f"Connecting to {target}{path} as {callsign} using {mode}...")
-        if self._via:
+        if self._via and mode == MODE_VARA_FM:
             self.terminal.display.append_system(
                 "Note: VARA FM needs a registered VARA license to connect "
                 "through digipeaters.")
@@ -1312,7 +1312,11 @@ class MainWindow(QMainWindow):
         cb = QComboBox()
         cb.setEditable(True)
         cb.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        cb.setMaximumWidth(130)
+        # Room for a full call with SSID ("WD5EMA-15"): with only a
+        # maximum width the row squeezed it until "None" read "one".
+        cb.setMinimumContentsLength(9)
+        cb.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
         cb.setToolTip(tooltip)
         self._fill_via_combo(cb)
         self._set_via(cb, current)

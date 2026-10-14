@@ -2,7 +2,8 @@
 
 Speaks the binary AGWPE frame protocol on a local port:
 * ``X`` register callsign → answered ``X`` with success;
-* ``C`` connect → answered ``C`` from the remote station (link up);
+* ``C`` connect, or ``v`` connect via digipeaters → answered ``C`` from
+  the remote station (link up); the digipeaters of a ``v`` are recorded;
 * ``D`` connected data → recorded; ``H\\r`` is answered with a help line,
   in a node's bare-CR style;
 * ``d`` disconnect → answered ``d``.
@@ -19,6 +20,7 @@ class FakeAGWPE:
     def __init__(self, answer_connect: bool = True):
         self.answer_connect = answer_connect
         self.frames: list[AGWPEFrame] = []
+        self.via: list[str] = []            # digipeaters of the last 'v' connect
         self._srv = socket.socket()
         self._srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._srv.bind(("127.0.0.1", 0))
@@ -84,6 +86,13 @@ class FakeAGWPE:
     def _answer(self, c, f: AGWPEFrame):
         if f.data_kind == "X":
             self._send(c, "X", f.call_from, "", b"\x01")
+        elif f.data_kind == "v":
+            n = f.data[0]
+            self.via = [f.data[1 + 10 * i: 11 + 10 * i].split(b"\x00", 1)[0].decode()
+                        for i in range(n)]
+            if self.answer_connect:
+                self._send(c, "C", f.call_to, f.call_from,
+                           f"*** CONNECTED With Station {f.call_to}\r".encode())
         elif f.data_kind == "C" and self.answer_connect:
             self._send(c, "C", f.call_to, f.call_from,
                        f"*** CONNECTED With Station {f.call_to}\r".encode())

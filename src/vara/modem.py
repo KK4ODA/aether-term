@@ -48,8 +48,8 @@ def parse_digipeaters(*fields: str) -> List[str]:
             raise ValueError(f"'{call}' is not a valid digipeater callsign.")
     if len(digis) > MAX_DIGIPEATERS:
         raise ValueError(
-            f"VARA FM supports at most {MAX_DIGIPEATERS} digipeaters "
-            f"({len(digis)} given).")
+            f"At most {MAX_DIGIPEATERS} digipeaters (Via 1 and Via 2) "
+            f"— {len(digis)} given.")
     return digis
 
 
