@@ -17,9 +17,10 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QComboBox, QStatusBar,
     QMenuBar, QMenu, QFrame, QMessageBox, QInputDialog,
+    QStyle, QStyleOptionComboBox,
 )
 from PyQt6.QtGui import QAction, QFont, QColor, QDesktopServices
-from PyQt6.QtCore import Qt, QTimer, QUrl, pyqtSlot
+from PyQt6.QtCore import Qt, QRect, QTimer, QUrl, pyqtSlot
 
 from config import (Config, APP_NAME, APP_VERSION, MODE_VARA_FM,
                     MODE_VARA_HF, MODE_AETHER_HF, MODE_AGWPE)
@@ -54,6 +55,7 @@ _MODEM_SIGNALS = (
 # digipeaters they remember.
 VIA_NONE = "None"
 MAX_VIA_HISTORY = 10
+VIA_WIDTH_SAMPLE = "WD5EMA-15"     # the widest call the boxes must show
 
 # How long the BBS must be quiet before an unfinished line (a prompt
 # without a line end) is shown.  VARA hands data over a frame at a time,
@@ -132,6 +134,7 @@ class MainWindow(QMainWindow):
         self._duration_timer.setInterval(1000)
         self._duration_timer.timeout.connect(self._update_duration)
 
+        self._fit_via_boxes()
         self._update_ui_state()
         self._show_welcome()
 
@@ -1312,15 +1315,31 @@ class MainWindow(QMainWindow):
         cb = QComboBox()
         cb.setEditable(True)
         cb.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        # Room for a full call with SSID ("WD5EMA-15"): with only a
-        # maximum width the row squeezed it until "None" read "one".
-        cb.setMinimumContentsLength(9)
-        cb.setSizeAdjustPolicy(
-            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        # Its minimum width is set by _fit_via_boxes once it is styled.
         cb.setToolTip(tooltip)
         self._fill_via_combo(cb)
         self._set_via(cb, current)
         return cb
+
+    def _fit_via_boxes(self):
+        """Give each Via box room for a full call with SSID ("WD5EMA-15").
+
+        1.1.4 set only a maximum width and the toolbar squeezed the boxes
+        until "None" read "one".  The style is asked where the text field
+        sits inside the box — the stylesheet's padding and the drop-down
+        included — so the width holds on Windows and Fusion alike.
+        """
+        for cb in (self.via1_input, self.via2_input):
+            cb.ensurePolished()
+            opt = QStyleOptionComboBox()
+            cb.initStyleOption(opt)
+            opt.rect = QRect(0, 0, 300, 30)
+            field = cb.style().subControlRect(
+                QStyle.ComplexControl.CC_ComboBox, opt,
+                QStyle.SubControl.SC_ComboBoxEditField, cb)
+            overhead = 300 - field.width()
+            text = cb.fontMetrics().horizontalAdvance(VIA_WIDTH_SAMPLE)
+            cb.setMinimumWidth(text + overhead + 12)   # + the line edit's own margins
 
     def _fill_via_combo(self, cb: QComboBox):
         cb.clear()
