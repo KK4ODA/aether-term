@@ -53,7 +53,7 @@ RestartApplications=yes
 ; UI
 WizardStyle=modern
 ; Uncomment when you have an icon:
-; SetupIconFile=resources\aether_term.ico
+; SetupIconFile=aether_term.ico
 ; UninstallDisplayIcon={app}\{#MyAppExeName}
 
 [Languages]

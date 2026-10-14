@@ -28,7 +28,6 @@ SRC_DIR = os.path.join(SPEC_DIR, 'src')
 # ── Data files to bundle ─────────────────────────────────────────
 # (source_path, destination_folder_in_bundle)
 datas = [
-    (os.path.join(SRC_DIR, 'resources'), 'resources'),
     (os.path.join(SPEC_DIR, 'version.txt'), '.'),
 ]
 
@@ -55,6 +54,7 @@ hiddenimports = [
     'vara.modem',
     'vara.connection',
     'vara.ptt',
+    'vara.rig_client',
     'vara.omnirig',
     'vara.hamlib',
     'vara.hamlib_download',
@@ -72,17 +72,9 @@ hiddenimports = [
     'PyQt6.QtSvg',
     'PyQt6.QtSvgWidgets',
 
-    # Crypto (for HMAC auth)
+    # Crypto (Fernet, for the saved-password file)
     'cryptography',
-    'cryptography.hazmat.primitives.hashes',
-    'cryptography.hazmat.primitives.hmac',
-    'cryptography.hazmat.primitives.kdf.pbkdf2',
-    'cryptography.hazmat.backends',
-
-    # Serial (for future direct serial or pyserial use)
-    'serial',
-    'serial.tools',
-    'serial.tools.list_ports',
+    'cryptography.fernet',
 
     # Keyring backends (optional — OS credential storage)
     'keyring',
@@ -110,7 +102,6 @@ if sys.platform == 'win32':
         'win32com.client',
         'pythoncom',
         'pywintypes',
-        'win32api',
     ]
 
 # ── Exclude unnecessary large packages ───────────────────────────

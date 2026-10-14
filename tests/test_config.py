@@ -149,3 +149,21 @@ def test_cleared_modem_path_stays_cleared(home):
     again = Config()
     assert again.get("vara_fm_exe_path") == ""
     assert again.get("vara_fm_auto_launch") is False
+
+
+def test_hamlib_archive_cannot_write_outside_its_folder(tmp_path):
+    """Archive entries like "../x" were written wherever they pointed."""
+    import io
+    import zipfile
+    import pytest
+    from vara.hamlib_download import HamlibDownloader
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("bin/rigctld.exe", b"ok")
+        zf.writestr("../../escaped.txt", b"bad")
+    dl = HamlibDownloader(install_dir=tmp_path / "hamlib")
+    (tmp_path / "hamlib").mkdir()
+    with pytest.raises(RuntimeError, match="outside the install folder"):
+        dl._extract_zip(io.BytesIO(buf.getvalue()))
+    assert not (tmp_path / "escaped.txt").exists()
+    assert not (tmp_path.parent / "escaped.txt").exists()

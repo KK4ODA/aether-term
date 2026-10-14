@@ -11,13 +11,13 @@ import logging
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
 
+LOG_FILE = Path.home() / "Aether Term" / "logs" / "aether-term.log"
+
 
 def setup_logging():
     """Configure application logging with rotating file handler."""
-    logs_dir = Path.home() / "Aether Term" / "logs"
-    logs_dir.mkdir(parents=True, exist_ok=True)
-
-    log_file = logs_dir / "aether-term.log"
+    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    log_file = LOG_FILE
 
     # Root logger
     root = logging.getLogger()
@@ -34,13 +34,14 @@ def setup_logging():
     ))
     root.addHandler(fh)
 
-    # Console handler (info+)
-    ch = logging.StreamHandler(sys.stdout)
-    ch.setLevel(logging.INFO)
-    ch.setFormatter(logging.Formatter(
-        "[%(levelname)-7s] %(name)-20s  %(message)s"
-    ))
-    root.addHandler(ch)
+    # Console handler (info+) — a windowed build has no console
+    if sys.stdout is not None:
+        ch = logging.StreamHandler(sys.stdout)
+        ch.setLevel(logging.INFO)
+        ch.setFormatter(logging.Formatter(
+            "[%(levelname)-7s] %(name)-20s  %(message)s"
+        ))
+        root.addHandler(ch)
 
     logging.getLogger("PyQt6").setLevel(logging.WARNING)
 
@@ -56,7 +57,7 @@ def install_error_handler(log):
     Errors in background threads are logged too.
     """
     import threading
-    log_file = Path.home() / "Aether Term" / "logs" / "aether-term.log"
+    log_file = LOG_FILE
     showing = []
 
     def hook(exc_type, exc, tb):
@@ -140,8 +141,13 @@ def main():
 
     except Exception as e:
         log.exception(f"Fatal error: {e}")
-        print(f"\n[FATAL] {e}")
-        print(f"Check logs at: {Path.home() / 'Aether Term' / 'logs' / 'aether-term.log'}\n")
+        message = f"Aether Term could not start:\n{e}\n\nDetails are in the log:\n{LOG_FILE}"
+        # The installed build has no console for print(): show a dialog
+        if QApplication.instance() is not None:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.critical(None, "Aether Term", message)
+        elif sys.stdout is not None:
+            print(f"\n[FATAL] {message}\n")
         sys.exit(1)
 
 
