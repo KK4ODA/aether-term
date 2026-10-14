@@ -586,3 +586,16 @@ def test_profile_sets_fm_bandwidth_on_connect_too(qapp, win, monkeypatch):
     win._connect_from_profile({"mode": "VARA FM", "fm_bandwidth": "NARROW",
                                "target_callsign": "KE4QCM-7"})
     assert win.config.get("fm_bandwidth") == "NARROW"
+
+
+def test_max_retries_setting_reaches_the_modem(qapp, win, monkeypatch):
+    """Settings → Max Retries was saved but the modem always tried 5 times."""
+    from vara.modem import VARAModem
+    from conftest import pump
+    tries = []
+    monkeypatch.setattr(VARAModem, "_do_connect",
+                        lambda self, host, c, d, n: tries.append(n))
+    win.config.set("max_retries", 2)
+    win._on_connect()
+    assert pump(qapp, until=lambda: tries, timeout=5)
+    assert tries == [2]

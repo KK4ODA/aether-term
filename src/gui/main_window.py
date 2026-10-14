@@ -616,7 +616,8 @@ class MainWindow(QMainWindow):
             data_port = self.config.data_port
             self.terminal.display.append_system(
                 f"{mode} modem: {host}:{cmd_port}/{data_port}")
-            self.modem.connect_to_modem(host, cmd_port, data_port)
+            self.modem.connect_to_modem(host, cmd_port, data_port,
+                                        self.config.get("max_retries", 5))
 
     def _start_host_ptt(self) -> bool:
         """Start radio keying when this program keys the radio (VARA HF, or
@@ -2099,6 +2100,10 @@ class MainWindow(QMainWindow):
             "\n",
             "normal"
         )
+
+        for problem in (self.config.load_error, self.passwords.load_error):
+            if problem:
+                self.terminal.display.append_error(f"  {problem}\n")
 
         if not self.config.get("my_callsign"):
             self.terminal.display.append_warning(

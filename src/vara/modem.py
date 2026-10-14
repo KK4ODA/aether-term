@@ -108,11 +108,12 @@ class VARAModem(QObject):
 
     # ── Connect to modem TCP ports ─────────────────────────────────
 
-    def connect_to_modem(self, host: str, cmd_port: int, data_port: int):
+    def connect_to_modem(self, host: str, cmd_port: int, data_port: int,
+                         max_retries: int = 5):
         """Connect TCP sockets to the VARA modem. Runs in a background thread."""
         self._stop.clear()
         t = threading.Thread(target=self._do_connect,
-                             args=(host, cmd_port, data_port),
+                             args=(host, cmd_port, data_port, max(1, max_retries)),
                              daemon=True, name="ModemConnect")
         t.start()
 

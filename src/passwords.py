@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional
 
+from config import atomic_write, set_aside
+
 log = logging.getLogger(__name__)
 
 # Try to import keyring (optional)
@@ -56,6 +58,7 @@ class PasswordStore:
         self._path = data_dir / "passwords.enc"
         self._passwords: Dict[str, dict] = {}
         self._fernet: Optional[object] = None
+        self.load_error = ""      # set when passwords.enc could not be read
 
         # Resolve the master key
         master = self._get_or_create_master(master_passphrase)
@@ -91,18 +94,25 @@ class PasswordStore:
                 self._passwords = json.loads(data.decode("utf-8"))
             else:
                 self._passwords = json.loads(raw.decode("utf-8"))
+            if not isinstance(self._passwords, dict):
+                raise ValueError("not a password table")
             log.info(f"Loaded {len(self._passwords)} saved passwords")
-        except Exception as e:
-            log.warning(f"Failed to load passwords: {e}")
+        except Exception as e:      # InvalidToken, bad JSON, missing cryptography...
+            # The next save would replace the file with only the new
+            # entry: move it aside so the saved passwords can be recovered.
             self._passwords = {}
+            kept = set_aside(self._path)
+            self.load_error = (f"Saved passwords could not be read ({e or type(e).__name__}); "
+                               f"kept as {kept.name}")
+            log.error(self.load_error)
 
     def _save(self):
         try:
             data = json.dumps(self._passwords, indent=2).encode("utf-8")
             if self._fernet:
                 data = self._fernet.encrypt(data)
-            self._path.write_bytes(data)
-        except Exception as e:
+            atomic_write(self._path, data)
+        except OSError as e:
             log.error(f"Failed to save passwords: {e}")
 
     # ── Public API ──────────────────────────────────────────────────
@@ -168,12 +178,6 @@ class PasswordStore:
         self._save()
         log.info(f"Password saved for {key}")
 
-    def remove_password(self, callsign: str, operator: str = ""):
-        key = self._make_key(callsign, operator)
-        if key in self._passwords:
-            del self._passwords[key]
-            self._save()
-
     def remove_by_key(self, key: str):
         """Remove a password by its raw storage key (used by the dialog)."""
         if key in self._passwords:
@@ -207,6 +211,3 @@ class PasswordStore:
         (composite).
         """
         return dict(self._passwords)
-
-    def has_password(self, callsign: str, operator: str = "") -> bool:
-        return self.get_password(callsign, operator) is not None

@@ -9,6 +9,7 @@ import json
 import os
 import shutil
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -78,6 +79,22 @@ def _app_data_dir() -> Path:
             log.warning(f"Could not migrate settings from {legacy}: {e}")
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def atomic_write(path: Path, data: bytes):
+    """Write *data* to *path* through a temporary file, so a crash or a
+    full disk mid-write leaves the old file instead of half a new one."""
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_bytes(data)
+    os.replace(tmp, path)
+
+
+def set_aside(path: Path) -> Path:
+    """Rename a file that could not be read out of the way, so the next
+    save does not overwrite it.  Returns where it went."""
+    dest = path.with_name(f"{path.name}.unreadable-{datetime.now():%Y%m%d-%H%M%S}")
+    path.replace(dest)
+    return dest
 
 
 def _logs_dir() -> Path:
@@ -153,11 +170,9 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     # Terminal appearance
     "font_family": "Consolas",
     "font_size": 11,
-    "theme": "dark",
 
     # Auth
     "auto_respond_hmac": True,
-    "allow_plaintext_fallback": True,
     "show_auth_protocol": False,
 
     # Session
@@ -174,9 +189,6 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     # Connection profiles
     "profiles": [],
 
-    # Command history
-    "command_history_size": 100,
-
     # Software updates
     "check_updates_on_startup": True,
     "update_branch": "main",
@@ -191,6 +203,7 @@ class Config:
         self._path = self._dir / "settings.json"
         # Deep copy: the default lists (profiles, macros) must not be shared
         self._data: Dict[str, Any] = copy.deepcopy(DEFAULT_SETTINGS)
+        self.load_error = ""      # set when settings.json could not be read
         self.load()
 
     # ── persistence ─────────────────────────────────────────────────
@@ -200,38 +213,41 @@ class Config:
             try:
                 with open(self._path, "r", encoding="utf-8") as f:
                     saved = json.load(f)
+                if not isinstance(saved, dict):
+                    raise ValueError("not a settings object")
                 # Merge saved over defaults so new keys get defaults
                 for k, v in saved.items():
                     self._data[k] = v
                 log.info(f"Config loaded from {self._path}")
                 log.debug(f"Loaded target_history: {self._data.get('target_history', [])}")
-            except Exception as e:
-                log.warning(f"Failed to load config: {e}")
+            except (OSError, ValueError) as e:
+                # Starting from defaults is unavoidable; overwriting the
+                # user's file with them at the next save is not.
+                kept = set_aside(self._path)
+                self.load_error = f"Settings could not be read ({e}); kept as {kept.name}"
+                log.error(self.load_error)
         self._migrate()
 
     def save(self):
         try:
             self._dir.mkdir(parents=True, exist_ok=True)
-            with open(self._path, "w", encoding="utf-8") as f:
-                json.dump(self._data, f, indent=2)
+            atomic_write(self._path, json.dumps(self._data, indent=2).encode("utf-8"))
             log.info(f"Config saved to {self._path}")
-        except Exception as e:
+        except OSError as e:
             log.error(f"Failed to save config to {self._path}: {e}")
-            import traceback
-            log.error(traceback.format_exc())
 
     def _migrate(self):
         """Apply one-time config migrations for new defaults."""
         changed = False
 
-        # v1.0 → v1.1: auto-launch defaults changed from False/empty to True/path
-        if not self._data.get("vara_fm_exe_path"):
-            self._data["vara_fm_exe_path"] = DEFAULT_SETTINGS["vara_fm_exe_path"]
-            self._data["vara_fm_auto_launch"] = True
-            changed = True
-        if not self._data.get("vara_hf_exe_path"):
-            self._data["vara_hf_exe_path"] = DEFAULT_SETTINGS["vara_hf_exe_path"]
-            self._data["vara_hf_auto_launch"] = True
+        # v1.0 → v1.1: auto-launch defaults changed from False/empty to
+        # True/path.  Once only: a path the user clears later stays cleared.
+        if not self._data.get("exe_paths_migrated"):
+            for modem in ("vara_fm", "vara_hf"):
+                if not self._data.get(f"{modem}_exe_path"):
+                    self._data[f"{modem}_exe_path"] = DEFAULT_SETTINGS[f"{modem}_exe_path"]
+                    self._data[f"{modem}_auto_launch"] = True
+            self._data["exe_paths_migrated"] = True
             changed = True
 
         # v1.0.1 → v1.0.2: fix macro commands to match BBS help output

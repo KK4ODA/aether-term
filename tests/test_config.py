@@ -85,3 +85,67 @@ def test_new_configs_do_not_share_profile_lists(home):
     Config().add_profile({"name": "X"})
     assert Config().get_profiles() == []
     assert DEFAULT_SETTINGS["profiles"] == []
+
+
+def test_unreadable_settings_are_kept_not_overwritten(home):
+    """A settings.json that fails to parse used to be replaced by the
+    defaults at the next save, losing profiles, macros and history."""
+    from config import Config
+    cfg = Config()
+    cfg.save()
+    cfg._path.write_text('{"my_callsign": "KK4ODA", "profiles": [', encoding="utf-8")
+    again = Config()
+    assert again.load_error and "unreadable" in again.load_error
+    kept = list(cfg._dir.glob("settings.json.unreadable-*"))
+    assert len(kept) == 1 and '"KK4ODA"' in kept[0].read_text()
+    again.save()
+    assert kept[0].exists()
+
+
+def test_unreadable_passwords_are_kept_not_overwritten(home, monkeypatch):
+    """A passwords.enc that fails to decrypt used to be overwritten by the
+    next saved password, losing every other one."""
+    import passwords
+    from config import Config
+    from passwords import PasswordStore
+    monkeypatch.setattr(passwords, "HAS_KEYRING", False)
+    d = Config().app_data_dir
+    store = PasswordStore(d)
+    store.set_password("W1AW-5", "one")
+    (d / "passwords.enc").write_bytes(b"not a fernet token")
+    store2 = PasswordStore(d)
+    assert store2.load_error
+    store2.set_password("KE4QCM-7", "two")
+    kept = list(d.glob("passwords.enc.unreadable-*"))
+    assert len(kept) == 1 and kept[0].read_bytes() == b"not a fernet token"
+    assert PasswordStore(d).get_password("KE4QCM-7") == "two"
+
+
+def test_save_leaves_no_partial_file(home, monkeypatch):
+    """Settings are written to a temporary file and renamed into place."""
+    import os
+    from config import Config
+    cfg = Config()
+    cfg.set("my_callsign", "KK4ODA")
+    cfg.save()
+    before = cfg._path.read_text()
+
+    def failing_replace(src, dst):
+        raise OSError("disk full")
+    monkeypatch.setattr(os, "replace", failing_replace)
+    cfg.set("my_callsign", "W1AW")
+    cfg.save()                                   # logged, not raised
+    assert cfg._path.read_text() == before
+
+
+def test_cleared_modem_path_stays_cleared(home):
+    """The v1.1 exe-path migration ran at every start, putting back a
+    path (and auto-launch) the user had cleared."""
+    from config import Config
+    cfg = Config()
+    cfg.set("vara_fm_exe_path", "")
+    cfg.set("vara_fm_auto_launch", False)
+    cfg.save()
+    again = Config()
+    assert again.get("vara_fm_exe_path") == ""
+    assert again.get("vara_fm_auto_launch") is False
