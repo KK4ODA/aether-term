@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import ssl
 import subprocess
 import sys
@@ -85,7 +86,6 @@ def _ssl_context() -> ssl.SSLContext:
 class CommitSummary:
     hash: str
     author: str
-    date: str
     subject: str
 
 
@@ -141,7 +141,6 @@ class Updater(QObject):
     """
 
     update_available = pyqtSignal(object)   # UpdateCheckResult
-    update_failed = pyqtSignal(str)         # error message
     check_finished = pyqtSignal(object)     # UpdateCheckResult, after every check
 
     def __init__(self, config, repo_dir: Optional[Path] = None, parent=None,
@@ -150,7 +149,6 @@ class Updater(QObject):
         super().__init__(parent)
         self._repo = repo_dir or _REPO_ROOT
         self._config = config
-        self._last_check: Optional[UpdateCheckResult] = None
         if current_version is None:
             from config import APP_VERSION
             current_version = APP_VERSION
@@ -168,12 +166,6 @@ class Updater(QObject):
     @property
     def is_git(self) -> bool:
         return self.mode == "git"
-
-    # ── public properties ───────────────────────────────────────────────
-
-    @property
-    def last_check(self) -> Optional[UpdateCheckResult]:
-        return self._last_check
 
     # ── git helpers ─────────────────────────────────────────────────────
 
@@ -211,13 +203,13 @@ class Updater(QObject):
 
     def _parse_log(self, range_spec: str) -> list[CommitSummary]:
         try:
-            raw = self._run_git("log", "--format=%h|%an|%ai|%s", range_spec)
+            raw = self._run_git("log", "--format=%h|%an|%s", range_spec)
         except GitError:
             return []
         commits: list[CommitSummary] = []
         for line in raw.splitlines():
-            parts = line.split("|", 3)
-            if len(parts) == 4:
+            parts = line.split("|", 2)
+            if len(parts) == 3:
                 commits.append(CommitSummary(*parts))
         return commits
 
@@ -240,7 +232,10 @@ class Updater(QObject):
             result.current_hash = self._run_git("rev-parse", "--short", "HEAD")
             result.remote_hash = self._run_git("rev-parse", "--short", f"origin/{branch}")
 
-            if result.current_hash != result.remote_hash:
+            # Only commits we don't have: a clone that is ahead of
+            # origin (local work, another branch) has nothing to pull.
+            behind = int(self._run_git("rev-list", "--count", f"HEAD..origin/{branch}"))
+            if behind > 0:
                 result.update_available = True
                 result.commits = self._parse_log(f"HEAD..origin/{branch}")
                 self.update_available.emit(result)
@@ -252,11 +247,9 @@ class Updater(QObject):
 
         except GitError as e:
             result.error = str(e)
-            self.update_failed.emit(result.error)
             log.warning("Update check failed: %s", e)
         except Exception as e:
             result.error = f"Unexpected error: {e}"
-            self.update_failed.emit(result.error)
             log.error("Update check error", exc_info=True)
 
         self._last_check = result
@@ -303,9 +296,7 @@ class Updater(QObject):
         except Exception as e:
             result.error = f"Release check failed: {e}"
         if result.error:
-            self.update_failed.emit(result.error)
             log.warning(result.error)
-        self._last_check = result
         return result
 
     # ── apply ───────────────────────────────────────────────────────────
@@ -322,9 +313,9 @@ class Updater(QObject):
             return result
         branch = self._config.get("update_branch", "main")
 
+        stashed = False
         try:
             # Stash any local changes so they don't block the pull
-            stashed = False
             if self._is_dirty():
                 try:
                     self._run_git("stash", "push", "-m", "auto-update stash")
@@ -338,22 +329,21 @@ class Updater(QObject):
             result.new_hash = self._run_git("rev-parse", "--short", "HEAD")
             result.success = True
             log.info("Updated %s → %s", result.old_hash, result.new_hash)
-
-            # Restore stashed changes
-            if stashed:
-                try:
-                    self._run_git("stash", "pop")
-                    log.info("Restored stashed local changes")
-                except GitError:
-                    log.warning("Could not restore stashed changes (may have conflicts)")
-
         except GitError as e:
             result.error = str(e)
             log.error("Update failed: %s", e)
         except Exception as e:
             result.error = f"Unexpected error: {e}"
             log.error("Update error", exc_info=True)
-
+        finally:
+            # Put local changes back, also when the pull failed
+            if stashed:
+                try:
+                    self._run_git("stash", "pop")
+                    log.info("Restored stashed local changes")
+                except GitError:
+                    log.warning("Could not restore stashed changes (may have "
+                                "conflicts) — they are in `git stash list`")
         return result
 
     # ── release install ─────────────────────────────────────────────────
@@ -368,8 +358,23 @@ class Updater(QObject):
         """
         if not result.installer_url:
             raise RuntimeError("This release has no installer to download.")
+        own_dir = dest_dir is None
         dest_dir = Path(dest_dir or tempfile.mkdtemp(prefix="aether-term-update-"))
         dest = dest_dir / (result.installer_name or "Aether_Term_Setup.exe")
+        try:
+            done = self._download(result, dest, progress)
+        except RuntimeError:
+            dest.unlink(missing_ok=True)       # nothing half-downloaded is kept
+            if own_dir:
+                shutil.rmtree(dest_dir, ignore_errors=True)
+            raise
+        log.info("Downloaded %s (%d bytes)", dest, done)
+        return dest
+
+    @staticmethod
+    def _download(result: UpdateCheckResult, dest: Path,
+                  progress: Optional[Callable[[int, int], None]]) -> int:
+        """Fetch the installer to *dest*, checking size and digest."""
         req = urllib.request.Request(result.installer_url, headers={
             "User-Agent": "AetherTerm-Updater"})
         sha = hashlib.sha256()
@@ -395,11 +400,9 @@ class Updater(QObject):
             raise RuntimeError(
                 f"Download incomplete ({done} of {result.installer_size} bytes).")
         if result.installer_sha256 and sha.hexdigest() != result.installer_sha256:
-            dest.unlink(missing_ok=True)
             raise RuntimeError("The downloaded installer failed its checksum "
                                "— not running it.")
-        log.info("Downloaded %s (%d bytes)", dest, done)
-        return dest
+        return done
 
     @staticmethod
     def launch_installer(path: Path):

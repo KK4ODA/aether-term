@@ -38,6 +38,7 @@ class UpdateDialog(QDialog):
         self._restart = restart_callback
         self._config = config
         self._quit = quit_callback
+        self._busy = False       # a download or git pull is running
         if can_install is None:
             from updater import is_installed_build
             can_install = is_installed_build()
@@ -175,6 +176,12 @@ class UpdateDialog(QDialog):
         btn_row.addWidget(self._update_btn)
         layout.addLayout(btn_row)
 
+    def reject(self):
+        """Esc / the window's close button: not while a download or pull
+        runs — its result would still launch the installer or restart."""
+        if not self._busy:
+            super().reject()
+
     def _open_release_page(self):
         QDesktopServices.openUrl(QUrl(self._result.release_url))
         self.accept()
@@ -186,6 +193,7 @@ class UpdateDialog(QDialog):
                   getattr(self, "_skip_btn", None)):
             if b:
                 b.setEnabled(False)
+        self._busy = True
         self._progress.setValue(0)
         self._progress.show()
         self._status.setStyleSheet("")
@@ -208,6 +216,7 @@ class UpdateDialog(QDialog):
             self._progress.setRange(0, 0)   # size unknown: indeterminate
 
     def _on_download_done(self, path, error: str):
+        self._busy = False
         self._progress.hide()
         if path is None:
             self._status.setText(f"{error}  You can download it from the "
@@ -237,6 +246,7 @@ class UpdateDialog(QDialog):
             QTimer.singleShot(300, self._quit)
 
     def _on_update_clicked(self):
+        self._busy = True
         self._update_btn.setEnabled(False)
         self._later_btn.setEnabled(False)
         self._progress.show()
@@ -253,6 +263,7 @@ class UpdateDialog(QDialog):
         self._apply_done.emit(result)
 
     def _on_apply_done(self, result):
+        self._busy = False
         self._progress.hide()
         if result.success:
             self._status.setText(

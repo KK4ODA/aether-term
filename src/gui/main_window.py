@@ -2074,9 +2074,11 @@ class MainWindow(QMainWindow):
 
     def _restart(self):
         """Graceful restart: launch a new process and exit."""
-        import subprocess as _sp
-        args = [sys.executable] + sys.argv
-        _sp.Popen(args, cwd=os.path.dirname(os.path.abspath(sys.argv[0])))
+        # The launchers start "py src\main.py": with a relative script path,
+        # the new process (started in another directory) would not find it.
+        script = os.path.abspath(sys.argv[0])
+        subprocess.Popen([sys.executable, script] + sys.argv[1:],
+                         cwd=os.path.dirname(os.path.dirname(script)))
         from PyQt6.QtWidgets import QApplication
         QApplication.instance().quit()
 
