@@ -33,7 +33,12 @@ class FakeAGWPE:
         return self
 
     def stop(self):
+        """Close everything, as Soundmodem quitting would."""
         for s in [self._srv] + self._conns:
+            try:
+                s.shutdown(socket.SHUT_RDWR)   # wakes our reader, sends FIN
+            except OSError:
+                pass
             try:
                 s.close()
             except OSError:

@@ -6,9 +6,9 @@ VARAModem.  MainWindow can use either transport transparently — just swap
 the modem object and reconnect signals.
 """
 
+import codecs
 import logging
 import threading
-import time
 from typing import Optional
 
 from PyQt6.QtCore import QObject, pyqtSignal
@@ -17,6 +17,10 @@ from vara.connection import ConnectionState
 from vara.agwpe import AGWPEClient, AGWPEFrame
 
 log = logging.getLogger(__name__)
+
+# How long an AX.25 connect may take before it is cancelled.  A call
+# through a digipeater at 1200 baud, with retries, can take a while.
+CONNECT_TIMEOUT = 60.0
 
 
 class AGWPEModem(QObject):
@@ -43,6 +47,8 @@ class AGWPEModem(QObject):
         self._target = ""
         self._rf_connected = False
         self.connected_via: list = []      # digipeaters of the current call
+        self._call_id = 0                  # which connect a timeout belongs to
+        self._decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
 
     @property
     def state(self) -> ConnectionState:
@@ -73,6 +79,7 @@ class AGWPEModem(QObject):
         # let the idle-link cleanup race the RF connect.
         client = AGWPEClient(
             host=host, port=port, on_frame=self._on_frame,
+            on_lost=self._on_link_lost,
         )
         if client.connect(timeout=10.0):
             self._client = client
@@ -123,18 +130,31 @@ class AGWPEModem(QObject):
             else:
                 self._client.connect_station(self._my_call, self._target)
 
-        # Timeout thread — if no 'C' frame in 30s, fail
-        threading.Thread(
-            target=self._connect_timeout,
-            daemon=True,
-            name="AGWPE-Timeout",
-        ).start()
+        # No 'C' frame in time: cancel the call.  The timer belongs to this
+        # call only — a later call must not be failed by it.
+        self._call_id += 1
+        timer = threading.Timer(CONNECT_TIMEOUT, self._connect_timeout,
+                                args=(self._call_id,))
+        timer.daemon = True
+        timer.start()
 
-    def _connect_timeout(self):
-        time.sleep(30.0)
-        if self._state == ConnectionState.CONNECTING:
-            self.error_signal.emit("AGWPE connection timeout (30s)")
-            self._set_state(ConnectionState.MODEM_CONNECTED)
+    def _connect_timeout(self, call_id: int):
+        if call_id != self._call_id or self._state != ConnectionState.CONNECTING:
+            return
+        # Stop Soundmodem calling on the air, then give up
+        if self._client:
+            self._client.disconnect_station(self._my_call, self._target)
+        self.error_signal.emit(
+            f"No answer from {self._target} in {CONNECT_TIMEOUT:.0f} s — call cancelled")
+        self._set_state(ConnectionState.MODEM_CONNECTED)
+
+    def _on_link_lost(self):
+        """Soundmodem closed the TCP link (it quit or crashed)."""
+        self._client = None
+        self._rf_connected = False
+        self._call_id += 1
+        self._set_state(ConnectionState.DISCONNECTED)
+        self.error_signal.emit("Lost connection to Soundmodem")
 
     def rf_disconnect(self):
         """Disconnect the AX.25 session."""
@@ -156,12 +176,15 @@ class AGWPEModem(QObject):
     def disconnect_from_modem(self):
         """Close the entire AGWPE TCP connection."""
         if self._client:
-            if self._rf_connected:
+            # Also a call still being placed: Soundmodem would go on
+            # calling on the air, and might connect with nobody here.
+            if self._rf_connected or self._state == ConnectionState.CONNECTING:
                 self._client.disconnect_station(self._my_call, self._target)
             self._client.unregister_callsign(self._my_call)
             self._client.disconnect()
             self._client = None
         self._rf_connected = False
+        self._call_id += 1
         self._set_state(ConnectionState.DISCONNECTED)
 
     # ── Frame handler ────────────────────────────────────────────────
@@ -171,6 +194,7 @@ class AGWPEModem(QObject):
         if frame.data_kind == "C" and not self._rf_connected:
             # AX.25 connection established
             self._rf_connected = True
+            self._decoder.reset()
             remote = frame.call_from if frame.call_from != self._my_call else frame.call_to
             self._target = remote
             self._set_state(ConnectionState.CONNECTED)
@@ -180,8 +204,10 @@ class AGWPEModem(QObject):
 
         elif frame.data_kind == "D":
             # Data from remote station
-            text = frame.data.decode("utf-8", errors="replace")
-            self.data_received.emit(text)
+            # A UTF-8 character can be split between two AX.25 frames
+            text = self._decoder.decode(frame.data)
+            if text:
+                self.data_received.emit(text)
 
         elif frame.data_kind == "d":
             # Remote station disconnected

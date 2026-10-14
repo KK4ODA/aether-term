@@ -166,6 +166,20 @@ def test_vara_hf_session(qapp, hf):
     assert not hf.ptt.is_enabled
 
 
+def test_disconnect_keys_the_radio_for_the_disconnect_frames(qapp, hf):
+    """Clicking Disconnect used to release PTT first, so VARA HF's own
+    disconnect frames went out with the radio unkeyed and the other
+    station never heard the link end."""
+    _connect(qapp, hf)
+    assert pump(qapp, until=lambda: hf.rig.calls[:2] == [True, False])
+    hf.rig.calls.clear()
+    hf._on_disconnect()
+    from vara.connection import ConnectionState
+    assert pump(qapp, until=lambda: hf.modem.state == ConnectionState.DISCONNECTED)
+    assert hf.rig.calls[:2] == [True, False], hf.rig.calls
+    assert not hf.rig.keyed and hf.rig.stopped
+
+
 def test_winlink_gateway_session_setting(qapp, hf):
     hf.config.set("hf_session", "WINLINK")
     _connect(qapp, hf)

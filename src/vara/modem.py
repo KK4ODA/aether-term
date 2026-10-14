@@ -8,6 +8,7 @@ https://github.com/KK4ODA/aether-hf/blob/master/docs/spec/host-interfaces.md).
 Uses Qt signals to communicate events back to the GUI thread.
 """
 
+import codecs
 import re
 import socket
 import logging
@@ -131,7 +132,7 @@ class VARAModem(QObject):
                 log.info("TCP connection to modem established")
                 self._set_state(ConnectionState.MODEM_CONNECTED)
                 self.modem_connected.emit()
-                self._start_reader_threads()
+                self._start_reader_threads(self._cmd_sock, self._data_sock)
                 return
             except OSError as e:
                 if attempt < max_retries:
@@ -146,11 +147,15 @@ class VARAModem(QObject):
                     self.error_signal.emit(msg)
                     self._set_state(ConnectionState.DISCONNECTED)
 
-    def _start_reader_threads(self):
-        threading.Thread(target=self._cmd_reader, daemon=True,
-                         name="CmdReader").start()
-        threading.Thread(target=self._data_reader, daemon=True,
-                         name="DataReader").start()
+    def _start_reader_threads(self, cmd_sock: socket.socket,
+                              data_sock: socket.socket):
+        # Each reader keeps the socket it was started on: reading
+        # self._cmd_sock would follow it to None on a disconnect, or to
+        # the next connection's socket.
+        threading.Thread(target=self._cmd_reader, args=(cmd_sock,),
+                         daemon=True, name="CmdReader").start()
+        threading.Thread(target=self._data_reader, args=(data_sock,),
+                         daemon=True, name="DataReader").start()
 
     # ── Initialization sequence ────────────────────────────────────
 
@@ -304,11 +309,12 @@ class VARAModem(QObject):
 
     # ── Internal: background readers ───────────────────────────────
 
-    def _cmd_reader(self):
+    def _cmd_reader(self, sock: socket.socket):
         """Read and parse events from the command socket."""
+        self._cmd_buf = ""
         while not self._stop.is_set():
             try:
-                chunk = self._cmd_sock.recv(1024)
+                chunk = sock.recv(1024)
                 if not chunk:
                     break
                 self._cmd_buf += chunk.decode("ascii", errors="replace")
@@ -321,23 +327,25 @@ class VARAModem(QObject):
                         self._handle_event(line)
             except OSError:
                 break
-        if not self._stop.is_set():
+        # A reader of an earlier, already closed connection says nothing
+        if not self._stop.is_set() and sock is self._cmd_sock:
             self._handle_tcp_error()
 
-    def _data_reader(self):
-        """Read data from the data socket and emit signals."""
+    def _data_reader(self, sock: socket.socket):
+        """Read data from the data socket and emit it as text."""
+        # Incremental: a UTF-8 character split between two reads is joined
+        # up instead of becoming two replacement characters.
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
         while not self._stop.is_set():
             try:
-                data = self._data_sock.recv(4096)
-                if not data:
-                    break
-                try:
-                    text = data.decode("utf-8", errors="replace")
-                    self.data_received.emit(text)
-                except Exception:
-                    pass
+                data = sock.recv(4096)
             except OSError:
                 break
+            if not data:
+                break
+            text = decoder.decode(data)
+            if text:
+                self.data_received.emit(text)
 
     # ── Event parsing ──────────────────────────────────────────────
 

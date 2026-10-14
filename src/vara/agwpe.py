@@ -108,10 +108,12 @@ class AGWPEClient:
         host: str = "127.0.0.1",
         port: int = 8000,
         on_frame: Optional[Callable[[AGWPEFrame], None]] = None,
+        on_lost: Optional[Callable[[], None]] = None,
     ):
         self._host = host
         self._port = port
         self._on_frame = on_frame
+        self._on_lost = on_lost       # the TNC closed the link (not disconnect())
         self._sock: Optional[socket.socket] = None
         self._reader_thread: Optional[threading.Thread] = None
         self._running = False
@@ -257,6 +259,8 @@ class AGWPEClient:
         if self._running:
             log.warning("AGWPE connection lost")
             self._running = False
+            if self._on_lost:
+                self._on_lost()
 
     def _recv_exact(self, n: int) -> Optional[bytes]:
         """Read exactly *n* bytes from the socket."""

@@ -769,11 +769,9 @@ class MainWindow(QMainWindow):
         self._connect_in_progress = False
         self._cleanup_timer.stop()
 
-        # Release PTT first
-        if self.ptt.is_enabled:
-            self.ptt.stop()
-            self.ptt_label.setText("")
-
+        # PTT stays with the modem until the link is down: VARA HF keys
+        # the radio to send its disconnect frames.  It is released on
+        # DISCONNECTED (_on_rf_disconnected / _on_state_changed).
         if self.modem.state == ConnectionState.CONNECTED:
             self.terminal.display.append_system("Disconnecting...")
             self.modem.rf_disconnect()
