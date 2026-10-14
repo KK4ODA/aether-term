@@ -28,6 +28,12 @@ Format: [version] — YYYY-MM-DD, then a bulleted list of changes.
   themselves. *(gui/main_window.py)*
 - The startup "OmniRig not running" notice appears only when OmniRig is
   the PTT method. *(gui/main_window.py)*
+- **Soundmodem (AGWPE) traffic is logged.** Every frame Aether Term sends to
+  or receives from Soundmodem goes into `aether-term.log` (kind, port,
+  calls, PID, length, the first 80 bytes). Heard-traffic monitor frames are
+  logged at debug level only. This is for a Soundmodem session through a
+  digipeater that connected but passed no data: the log will show whether
+  the typed lines reached Soundmodem. *(vara/agwpe.py, vara/agwpe_modem.py)*
 
 ---
 

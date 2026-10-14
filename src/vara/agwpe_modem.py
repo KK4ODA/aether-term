@@ -151,6 +151,8 @@ class AGWPEModem(QObject):
             self._client.send_connected_data(
                 self._my_call, self._target, data,
             )
+        else:
+            log.warning(f"AGWPE data not sent (no link): {text[:80]!r}")
 
     def send_data_bytes(self, data: bytes):
         """Send raw bytes over the AX.25 connection."""
