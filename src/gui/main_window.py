@@ -17,9 +17,10 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QComboBox, QStatusBar,
     QMenuBar, QMenu, QFrame, QMessageBox, QInputDialog,
+    QStyle, QStyleOptionComboBox,
 )
 from PyQt6.QtGui import QAction, QFont, QColor, QDesktopServices
-from PyQt6.QtCore import Qt, QTimer, QUrl, pyqtSlot
+from PyQt6.QtCore import Qt, QRect, QTimer, QUrl, pyqtSlot
 
 from config import (Config, APP_NAME, APP_VERSION, MODE_VARA_FM,
                     MODE_VARA_HF, MODE_AETHER_HF, MODE_AGWPE)
@@ -54,6 +55,7 @@ _MODEM_SIGNALS = (
 # digipeaters they remember.
 VIA_NONE = "None"
 MAX_VIA_HISTORY = 10
+VIA_WIDTH_SAMPLE = "WD5EMA-15"     # the widest call the boxes must show
 
 # How long the BBS must be quiet before an unfinished line (a prompt
 # without a line end) is shown.  VARA hands data over a frame at a time,
@@ -132,6 +134,7 @@ class MainWindow(QMainWindow):
         self._duration_timer.setInterval(1000)
         self._duration_timer.timeout.connect(self._update_duration)
 
+        self._fit_via_boxes()
         self._update_ui_state()
         self._show_welcome()
 
@@ -260,15 +263,15 @@ class MainWindow(QMainWindow):
         # one); the last call's choice comes back next time.
         row1.addWidget(QLabel("Via 1:"))
         self.via1_input = self._make_via_combo(
-            "First digipeater in the path (VARA FM only).\n"
+            "First digipeater in the path (VARA FM or Soundmodem).\n"
             "None for a direct connection.\n"
-            "Connecting via digipeaters needs a registered VARA license.",
+            "VARA FM needs a registered VARA license to use digipeaters.",
             self.config.get("last_via1", ""))
         row1.addWidget(self.via1_input)
 
         row1.addWidget(QLabel("Via 2:"))
         self.via2_input = self._make_via_combo(
-            "Second digipeater in the path (VARA FM only).\n"
+            "Second digipeater in the path (VARA FM or Soundmodem).\n"
             "Only needed for two-hop routes.",
             self.config.get("last_via2", ""))
         row1.addWidget(self.via2_input)
@@ -538,8 +541,8 @@ class MainWindow(QMainWindow):
     def _check_digipeaters(self) -> bool:
         """Validate the Via fields; False (after telling the user) to stop.
 
-        Only VARA FM can route through digipeaters — VARA HF, Aether HF
-        and the Soundmodem path would otherwise silently call direct.
+        VARA FM and Soundmodem (AGWPE) route through digipeaters; VARA HF
+        and Aether HF would otherwise silently call direct.
         """
         try:
             digis = parse_digipeaters(self._via_value(self.via1_input),
@@ -548,13 +551,13 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Digipeater Path", str(e))
             self.via1_input.setFocus()
             return False
-        if digis and self.config.mode != MODE_VARA_FM:
+        if digis and self.config.mode not in (MODE_VARA_FM, MODE_AGWPE):
             QMessageBox.warning(
                 self, "Digipeater Path",
-                "Digipeaters are only supported in VARA FM mode.\n\n"
-                f"Clear Via 1 / Via 2 to call direct with "
+                "Digipeaters are supported with VARA FM and Soundmodem.\n\n"
+                f"Set Via 1 / Via 2 to None to call direct with "
                 f"{_MODE_LABEL.get(self.config.mode, self.config.mode)}, "
-                "or switch to VARA FM.")
+                "or switch modes.")
             return False
         return True
 
@@ -572,7 +575,7 @@ class MainWindow(QMainWindow):
         path = f" via {', '.join(self._via)}" if self._via else ""
         self.terminal.display.append_system(
             f"Connecting to {target}{path} as {callsign} using {mode}...")
-        if self._via:
+        if self._via and mode == MODE_VARA_FM:
             self.terminal.display.append_system(
                 "Note: VARA FM needs a registered VARA license to connect "
                 "through digipeaters.")
@@ -637,7 +640,8 @@ class MainWindow(QMainWindow):
         callsign = self._effective_callsign()
         self.modem.initialize_modem(
             callsign, self.config.is_hf_band, self.config.session_bandwidth,
-            query_version=self.config.is_aether)
+            query_version=self.config.is_aether,
+            session=self.config.vara_session)
 
     @pyqtSlot(object)
     def _on_init_complete(self, new_state):
@@ -1004,6 +1008,13 @@ class MainWindow(QMainWindow):
         if state in (ConnectionState.CONNECTED,
                      ConnectionState.DISCONNECTED):
             self._connect_in_progress = False
+        # The modem link is gone (closed, failed call cleaned up, or the
+        # modem crashed / dropped TCP): never leave the radio keyed or the
+        # rig link open waiting for a PTT OFF that cannot come.
+        if state == ConnectionState.DISCONNECTED and self.ptt.is_enabled:
+            log.info("Modem link closed — releasing PTT")
+            self.ptt.stop()
+            self.ptt_label.setText("")
         # Falling back to MODEM_CONNECTED from a call (refused, timed out,
         # CANCELPENDING, rejected CONNECT, or a session that ended) is the
         # end of that connect sequence too — unlike the INITIALIZING →
@@ -1304,11 +1315,31 @@ class MainWindow(QMainWindow):
         cb = QComboBox()
         cb.setEditable(True)
         cb.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        cb.setMaximumWidth(130)
+        # Its minimum width is set by _fit_via_boxes once it is styled.
         cb.setToolTip(tooltip)
         self._fill_via_combo(cb)
         self._set_via(cb, current)
         return cb
+
+    def _fit_via_boxes(self):
+        """Give each Via box room for a full call with SSID ("WD5EMA-15").
+
+        1.1.4 set only a maximum width and the toolbar squeezed the boxes
+        until "None" read "one".  The style is asked where the text field
+        sits inside the box — the stylesheet's padding and the drop-down
+        included — so the width holds on Windows and Fusion alike.
+        """
+        for cb in (self.via1_input, self.via2_input):
+            cb.ensurePolished()
+            opt = QStyleOptionComboBox()
+            cb.initStyleOption(opt)
+            opt.rect = QRect(0, 0, 300, 30)
+            field = cb.style().subControlRect(
+                QStyle.ComplexControl.CC_ComboBox, opt,
+                QStyle.SubControl.SC_ComboBoxEditField, cb)
+            overhead = 300 - field.width()
+            text = cb.fontMetrics().horizontalAdvance(VIA_WIDTH_SAMPLE)
+            cb.setMinimumWidth(text + overhead + 12)   # + the line edit's own margins
 
     def _fill_via_combo(self, cb: QComboBox):
         cb.clear()

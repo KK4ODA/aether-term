@@ -25,6 +25,23 @@ def test_header_is_36_bytes_at_the_spec_offsets():
     assert raw[36:] == b"ARES\r"
 
 
+def test_connect_via_frame_lists_the_digipeaters():
+    """'v' frame data: digipeater count (1 byte), then 10 bytes per call."""
+    from vara.agwpe import AGWPEClient
+    sent = []
+    client = AGWPEClient()
+    client.send_frame = lambda f: sent.append(encode_frame(f)) or True
+    client.connect_station_via("KK4ODA", "KE4QCM-7", ["WD5EMA-4", "N4XYZ"])
+    raw = sent[0]
+    assert raw[4:5] == b"v"
+    assert raw[8:18] == b"KK4ODA".ljust(10, b"\x00")
+    assert raw[18:28] == b"KE4QCM-7".ljust(10, b"\x00")
+    assert int.from_bytes(raw[28:32], "little") == 21
+    assert raw[36] == 2
+    assert raw[37:47] == b"WD5EMA-4".ljust(10, b"\x00")
+    assert raw[47:57] == b"N4XYZ".ljust(10, b"\x00")
+
+
 def test_decode_reads_a_spec_header():
     header = (bytes([0, 0, 0, 0]) + b"C\x00" + bytes([0xF0, 0])
               + b"W1AW-5".ljust(10, b"\x00") + b"KK4ODA".ljust(10, b"\x00")

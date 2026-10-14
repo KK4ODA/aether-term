@@ -48,8 +48,8 @@ def parse_digipeaters(*fields: str) -> List[str]:
             raise ValueError(f"'{call}' is not a valid digipeater callsign.")
     if len(digis) > MAX_DIGIPEATERS:
         raise ValueError(
-            f"VARA FM supports at most {MAX_DIGIPEATERS} digipeaters "
-            f"({len(digis)} given).")
+            f"At most {MAX_DIGIPEATERS} digipeaters (Via 1 and Via 2) "
+            f"— {len(digis)} given.")
     return digis
 
 
@@ -163,15 +163,22 @@ class VARAModem(QObject):
     # ── Initialization sequence ────────────────────────────────────
 
     def initialize_modem(self, callsign: str, is_hf: bool,
-                         bandwidth: int = 500, query_version: bool = False):
-        """Send the VARA initialization commands. Call after modem_connected."""
+                         bandwidth: int = 500, query_version: bool = False,
+                         session: str = "", **_unused):
+        """Send the VARA initialization commands. Call after modem_connected.
+
+        *session* ("P2P" / "WINLINK") goes out as ``<session> SESSION``
+        (VARA HF only).  Unknown keyword arguments are ignored, so the
+        window can pass every modem the same ones.
+        """
         t = threading.Thread(target=self._do_init,
-                             args=(callsign, is_hf, bandwidth, query_version),
+                             args=(callsign, is_hf, bandwidth, query_version,
+                                   session),
                              daemon=True, name="ModemInit")
         t.start()
 
     def _do_init(self, callsign: str, is_hf: bool, bandwidth: int,
-                 query_version: bool = False):
+                 query_version: bool = False, session: str = ""):
         self._set_state(ConnectionState.INITIALIZING)
         try:
             time.sleep(0.3)
@@ -202,6 +209,12 @@ class VARAModem(QObject):
             if is_hf and bandwidth in (500, 2300, 2750):
                 self._send_cmd(f"BW{bandwidth}")
                 time.sleep(1.0)
+
+            # 3b. VARA HF retry cycle: P2P for a BBS/station, WINLINK for
+            #     a Winlink gateway (VARA's TNC command reference)
+            if session:
+                self._send_cmd(f"{session} SESSION")
+                time.sleep(0.3)
 
             # 4. Ask which modem this is — Aether HF answers
             #    "VERSION Aether HF <version>", so a VARA modem left on the

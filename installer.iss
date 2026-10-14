@@ -17,7 +17,7 @@
 ; ═══════════════════════════════════════════════════════════════
 
 #define MyAppName "Aether Term"
-#define MyAppVersion "1.1.4"
+#define MyAppVersion "1.1.5"
 #define MyAppPublisher "KK4ODA"
 #define MyAppURL "https://github.com/KK4ODA/aether-term"
 #define MyAppExeName "Aether Term.exe"

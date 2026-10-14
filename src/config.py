@@ -123,6 +123,10 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
 
     # RF settings
     "hf_bandwidth": 500,  # 500 / 2300 / 2750
+    # VARA HF retry cycle: "P2P" for calls to a BBS or station (VARA's
+    # reference: P2P SESSION "must be used for P2P connections"),
+    # "WINLINK" for Winlink gateways (VARA's own default)
+    "hf_session": "P2P",
     "fm_bandwidth": "WIDE",  # NARROW / WIDE
     "max_retries": 5,
 
@@ -307,6 +311,14 @@ class Config:
         if self.is_aether:
             return int(self._data.get("aether_bandwidth", 2300))
         return int(self._data.get("hf_bandwidth", 500))
+
+    @property
+    def vara_session(self) -> str:
+        """"P2P" or "WINLINK" for VARA HF (sent as "<x> SESSION"); "" otherwise."""
+        if not self.is_hf:
+            return ""
+        s = str(self._data.get("hf_session", "P2P")).upper()
+        return s if s in ("P2P", "WINLINK") else "P2P"
 
     @property
     def needs_host_ptt(self) -> bool:

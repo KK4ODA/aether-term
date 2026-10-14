@@ -17,6 +17,7 @@ a safety watchdog that releases PTT if the modem stops communicating.
 """
 
 import logging
+import queue
 import threading
 import time
 from typing import Optional
@@ -54,6 +55,11 @@ class PTTController(QObject):
         self._rig_number = 1
         self._watchdog: Optional[threading.Timer] = None
         self._lock = threading.Lock()
+        # Radio keying runs on one worker thread, in the order the modem
+        # asked: a thread per event let a slow PTT ON run after the PTT OFF
+        # that followed it, leaving the transmitter keyed.
+        self._keying: "queue.Queue[bool]" = queue.Queue()
+        self._worker: Optional[threading.Thread] = None
 
     @property
     def is_enabled(self) -> bool:
@@ -176,6 +182,7 @@ class PTTController(QObject):
         log.info(f"PTT stop() called from:\n{caller}")
 
         self._cancel_watchdog()
+        self.wait_idle(timeout=3.0)         # queued keying runs before we release
         with self._lock:
             if self._ptt_on:
                 try:
@@ -235,12 +242,7 @@ class PTTController(QObject):
         action = "KEYING" if ptt_on else "UNKEYING"
         log.info(f"PTT {action} radio via {self._backend}")
 
-        # Dispatch to background thread
-        t = threading.Thread(
-            target=self._do_ptt, args=(ptt_on,),
-            name="PTT-dispatch", daemon=True)
-        t.start()
-
+        self._queue_keying(ptt_on)
         self.ptt_changed.emit(ptt_on)
 
         # Watchdog management
@@ -248,6 +250,34 @@ class PTTController(QObject):
             self._start_watchdog()
         else:
             self._cancel_watchdog()
+
+    def _queue_keying(self, ptt_on: bool):
+        """Key or unkey the radio on the worker thread, in order."""
+        with self._lock:
+            if self._worker is None:
+                # One long-lived worker: one that quit when idle could miss
+                # a command queued just as it was leaving.
+                self._worker = threading.Thread(
+                    target=self._keying_loop, name="PTT-keying", daemon=True)
+                self._worker.start()
+        self._keying.put(ptt_on)
+
+    def _keying_loop(self):
+        while True:
+            ptt_on = self._keying.get()
+            try:
+                self._do_ptt(ptt_on)
+            finally:
+                self._keying.task_done()
+
+    def wait_idle(self, timeout: float = 5.0) -> bool:
+        """Wait until queued keying commands have run (shutdown, tests)."""
+        end = time.time() + timeout
+        while self._keying.unfinished_tasks:
+            if time.time() > end:
+                return False
+            time.sleep(0.01)
+        return True
 
     def _do_ptt(self, ptt_on: bool):
         """Execute PTT command on a background thread."""
@@ -313,16 +343,7 @@ class PTTController(QObject):
             f"PTT WATCHDOG: forcibly releasing PTT after {WATCHDOG_TIMEOUT:.0f}s. "
             f"Check VARA HF modem status!"
         )
-        try:
-            if self._backend == "flrig" and self._flrig and self._flrig.is_started:
-                self._flrig.set_ptt(False)
-            elif self._backend == "hamlib" and self._hamlib and self._hamlib.is_started:
-                self._hamlib.set_ptt(False)
-            elif self._omnirig and self._omnirig.is_started:
-                self._omnirig.set_ptt(False)
-        except Exception as e:
-            log.error(f"PTT watchdog release error: {e}")
-
+        self._queue_keying(False)           # behind anything already queued
         self.ptt_changed.emit(False)
         self.ptt_error.emit("PTT watchdog: forced release after timeout")
 

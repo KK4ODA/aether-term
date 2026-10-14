@@ -5,6 +5,53 @@ Format: [version] — YYYY-MM-DD, then a bulleted list of changes.
 
 ---
 
+## [1.1.5] — 2026-10-14
+
+### Fixed
+
+- **The radio can no longer be left keyed by PTT commands running out of
+  order.** Each VARA HF `PTT ON` / `PTT OFF` was handed to its own
+  background thread. When keying the rig was slow (OmniRig, CAT), a
+  `PTT OFF` could run before the `PTT ON` ahead of it and leave the
+  transmitter keyed until the 90-second watchdog fired. Keying now runs on
+  one worker thread, in the order VARA asked, and the watchdog's forced
+  release queues behind it. *(vara/ptt.py)*
+- **PTT is released whenever the modem link closes.** If VARA crashed or
+  its TCP link dropped mid-transmission, the radio stayed keyed until the
+  watchdog fired. A call that failed with `WRONG` or `CANCELPENDING` also
+  left the rig link open. Now any end of the modem link unkeys the radio
+  and closes the rig link at once. *(gui/main_window.py)*
+
+- **Via boxes show the whole callsign.** In 1.1.4 the Via 1 / Via 2
+  dropdowns had only a maximum width, and the toolbar squeezed them to about
+  35 px: "None" read "one" and only two letters of a callsign were visible.
+  They now always have room for a full call with SSID (`WD5EMA-15`).
+  *(gui/main_window.py)*
+
+### Added
+
+- **VARA HF sends `P2P SESSION`.** VARA's command reference says
+  `P2P SESSION` "must be used for P2P connections, not for Gateways", and
+  VARA HF defaults to `WINLINK SESSION`, a 4-second retry cycle meant for
+  Winlink gateways. Calls to a BBS or station now use P2P. A new
+  **Settings → Session Type** option switches to *Winlink gateway* for RMS
+  calls. VARA FM, Aether HF and Soundmodem are unchanged.
+  *(config.py, vara/modem.py, gui/settings_dialog.py)*
+- **Digipeaters with Soundmodem (AGWPE).** Via 1 / Via 2 now work in
+  Soundmodem mode. The call goes out as AGWPE's "connect via" frame (`v`:
+  the digipeater count, then each call), so the path is set per call from
+  Aether Term. Soundmodem's own `Digi` settings are for Soundmodem acting as
+  a digipeater, and do not route outgoing calls. VARA HF and Aether HF still
+  refuse a Via path. *(vara/agwpe.py, vara/agwpe_modem.py, gui/main_window.py)*
+- **VARA HF end-to-end tests.** A full session against the fake modem
+  covers the init commands, `CONNECTED … 2300`, PTT keying and unkeying
+  through a fake rig, release on disconnect, a refused call, a rejected
+  `CONNECT`, and a modem crash while keyed. The PTT controller has its own
+  tests for ordering, the watchdog and stop. Both modem drivers now ignore
+  initialization arguments they don't use, so a new argument can't crash
+  one of them again. *(tests/test_vara_hf.py, vara/modem.py,
+  vara/agwpe_modem.py)*
+
 ## [1.1.4] — 2026-10-13
 
 ### Changed

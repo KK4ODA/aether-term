@@ -129,6 +129,15 @@ class SettingsDialog(QDialog):
             "2750 Hz = fastest, needs good signal."
         )
         hf_form.addRow("Session Bandwidth (Hz):", self.hf_bw_combo)
+        self.hf_session_combo = QComboBox()
+        self.hf_session_combo.addItem("P2P (BBS or station)", "P2P")
+        self.hf_session_combo.addItem("Winlink gateway", "WINLINK")
+        self.hf_session_combo.setToolTip(
+            "VARA HF connect retry cycle.\n"
+            "P2P = calls to a BBS or another station (needed when either\n"
+            "end runs an SDR).\n"
+            "Winlink gateway = VARA's default 4-second cycle for RMS gateways.")
+        hf_form.addRow("Session Type:", self.hf_session_combo)
         layout.addWidget(self.hf_bw_group)
 
         # Aether HF Settings — only visible when Aether HF mode selected
@@ -561,6 +570,8 @@ class SettingsDialog(QDialog):
         idx = self.hf_bw_combo.findText(bw)
         if idx >= 0:
             self.hf_bw_combo.setCurrentIndex(idx)
+        idx = self.hf_session_combo.findData(str(c.get("hf_session", "P2P")).upper())
+        self.hf_session_combo.setCurrentIndex(idx if idx >= 0 else 0)
 
         ae_bw = 500 if int(c.get("aether_bandwidth", 2300)) == 500 else 2300
         self.aether_bw_combo.setCurrentText(str(ae_bw))
@@ -638,6 +649,7 @@ class SettingsDialog(QDialog):
         else:
             c.set("vara_mode", "VARA FM")
         c.set("hf_bandwidth", int(self.hf_bw_combo.currentText()))
+        c.set("hf_session", self.hf_session_combo.currentData())
         c.set("fm_bandwidth", self.fm_bw_combo.currentText())
         c.set("font_family", self.font_family_combo.currentText())
         c.set("font_size", self.font_size_spin.value())

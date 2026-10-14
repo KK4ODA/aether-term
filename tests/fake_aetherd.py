@@ -92,6 +92,20 @@ class FakeAetherd:
             except OSError:
                 pass
 
+    def push_event(self, line: str):
+        """Send an unprompted command-port event (e.g. "PTT ON")."""
+        if self._conns:
+            self._conns[0].sendall(line.encode() + b"\r")
+
+    def drop_link(self):
+        """Close the host connection, as if the modem crashed."""
+        for s in list(self._conns):
+            try:
+                s.shutdown(socket.SHUT_RDWR)
+                s.close()
+            except OSError:
+                pass
+
     # ── control API ─────────────────────────────────────────────────
 
     def status(self) -> dict:

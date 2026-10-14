@@ -43,6 +43,7 @@ class AGWPEModem(QObject):
         self._my_call = ""
         self._target = ""
         self._rf_connected = False
+        self.connected_via: list = []      # digipeaters of the current call
 
     @property
     def state(self) -> ConnectionState:
@@ -84,7 +85,8 @@ class AGWPEModem(QObject):
             self._set_state(ConnectionState.DISCONNECTED)
 
     def initialize_modem(self, callsign: str, is_hf: bool = False,
-                         bandwidth: int = 0, query_version: bool = False):
+                         bandwidth: int = 0, query_version: bool = False,
+                         **_unused):
         """Register callsign with the TNC.
 
         Takes the same arguments as ``VARAModem.initialize_modem``;
@@ -101,19 +103,26 @@ class AGWPEModem(QObject):
 
     def rf_connect(self, my_call: str, target: str,
                    via1: str = "", via2: str = ""):
-        """Initiate AX.25 connection to a remote station.
+        """Initiate an AX.25 connection to a remote station.
 
-        *via1* and *via2* are ignored — AGWPE routing uses its own
-        digipeater configuration.
+        With *via1* / *via2* the call goes through those digipeaters
+        (AGWPE 'v' frame); Soundmodem's own Digi settings are for it
+        acting as a digipeater, not for the path of our calls.
         """
         self._my_call = my_call.upper()
         self._target = target.upper()
+        digis = [d.upper() for d in (via1, via2) if d]
+        self.connected_via = digis
         self._set_state(ConnectionState.CONNECTING)
         self.pending_signal.emit()
-        self.command_event.emit(f"CONNECT {self._my_call} {self._target}")
+        path = f" VIA {' '.join(digis)}" if digis else ""
+        self.command_event.emit(f"CONNECT {self._my_call} {self._target}{path}")
 
         if self._client:
-            self._client.connect_station(self._my_call, self._target)
+            if digis:
+                self._client.connect_station_via(self._my_call, self._target, digis)
+            else:
+                self._client.connect_station(self._my_call, self._target)
 
         # Timeout thread — if no 'C' frame in 30s, fail
         threading.Thread(

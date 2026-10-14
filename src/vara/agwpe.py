@@ -179,6 +179,20 @@ class AGWPEClient:
             call_from=my_call, call_to=remote_call, data=b"",
         ))
 
+    def connect_station_via(self, my_call: str, remote_call: str,
+                            digis: list, port: int = 0,
+                            pid: int = 0xF0) -> bool:
+        """Connect through digipeaters ('v' frame).
+
+        Data: the number of digipeaters (1 byte), then each call in a
+        10-byte null-padded field — the AGWPE "connect via" frame.
+        """
+        data = bytes([len(digis)]) + b"".join(_encode_call(d) for d in digis)
+        return self.send_frame(AGWPEFrame(
+            port=port, data_kind="v", pid=pid,
+            call_from=my_call, call_to=remote_call, data=data,
+        ))
+
     def disconnect_station(self, my_call: str, remote_call: str,
                            port: int = 0) -> bool:
         """Disconnect from a remote station ('d' frame)."""
