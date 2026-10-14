@@ -5,6 +5,26 @@ Format: [version] — YYYY-MM-DD, then a bulleted list of changes.
 
 ---
 
+## [1.1.7] — 2026-10-14
+
+### Fixed
+
+- **Profiles in another mode swap the modem program.** Choosing a
+  connection profile whose mode differs from the current one (say a
+  VARA FM profile while in Soundmodem) changed the mode but left the old
+  modem program running and didn't start the new one. It now does what the
+  mode dropdown does: closes the old modem's link and program, then starts
+  the new one, if that mode's auto-launch setting is on. *Connect* from the Profiles
+  window waits 5 seconds for a freshly started modem before calling.
+  *(gui/main_window.py)*
+- **No mode or profile change mid-call.** The profile dropdown is now locked
+  during a call, like the mode dropdown. Switching modes is refused with a
+  note until you disconnect. *(gui/main_window.py)*
+- A mode switch in the first half-second after startup could start the
+  new modem program twice. *(gui/main_window.py)*
+
+---
+
 ## [1.1.6] — 2026-10-14
 
 ### Added
