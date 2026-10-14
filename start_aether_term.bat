@@ -145,11 +145,11 @@ if errorlevel 1 (
     set "MISSING_LIST=!MISSING_LIST! cryptography"
 )
 
-!PY! -c "import serial" >nul 2>&1
+!PY! -c "import certifi" >nul 2>&1
 if errorlevel 1 (
-    echo  [MISSING] pyserial
+    echo  [MISSING] certifi
     set MISSING=1
-    set "MISSING_LIST=!MISSING_LIST! pyserial"
+    set "MISSING_LIST=!MISSING_LIST! certifi"
 )
 
 :: -- Optional: keyring -----------------------------------------------------------
@@ -207,11 +207,11 @@ if !MISSING!==1 (
     if /i "!INSTALL_CHOICE!"=="Y" (
         echo.
         echo  Installing dependencies...
-        !PY! -m pip install PyQt6 cryptography pyserial
+        !PY! -m pip install PyQt6 cryptography certifi
         if errorlevel 1 (
             echo.
             echo  [ERROR] pip install failed. Please run manually:
-            echo    !PY! -m pip install PyQt6 cryptography pyserial
+            echo    !PY! -m pip install PyQt6 cryptography certifi
             pause
             exit /b 1
         )

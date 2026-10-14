@@ -17,7 +17,7 @@
 ; ═══════════════════════════════════════════════════════════════
 
 #define MyAppName "Aether Term"
-#define MyAppVersion "1.1.7"
+#define MyAppVersion "1.1.8"
 #define MyAppPublisher "KK4ODA"
 #define MyAppURL "https://github.com/KK4ODA/aether-term"
 #define MyAppExeName "Aether Term.exe"
@@ -53,7 +53,7 @@ RestartApplications=yes
 ; UI
 WizardStyle=modern
 ; Uncomment when you have an icon:
-; SetupIconFile=resources\aether_term.ico
+; SetupIconFile=aether_term.ico
 ; UninstallDisplayIcon={app}\{#MyAppExeName}
 
 [Languages]

@@ -9,8 +9,8 @@ Passwords are keyed by ``OPERATOR@TARGET`` (per-operator) or just
 import logging
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
-    QPushButton, QHeaderView, QLabel, QLineEdit, QComboBox,
-    QMessageBox, QDialogButtonBox, QFormLayout, QGroupBox, QCheckBox,
+    QPushButton, QHeaderView, QLabel, QLineEdit, QMessageBox,
+    QDialogButtonBox, QFormLayout, QCheckBox,
 )
 from PyQt6.QtCore import Qt
 
@@ -201,14 +201,9 @@ class _PasswordEntryDialog(QDialog):
         )
         form.addRow(self.show_pw)
 
-        self.mode_combo = QComboBox()
-        self.mode_combo.addItems(["HMAC-SHA256", "Plaintext Fallback"])
-        self.mode_combo.setToolTip(
-            "HMAC-SHA256 = secure challenge-response (recommended).\n"
-            "Password is never sent over RF.\n"
-            "Plaintext Fallback = sends password if HMAC fails."
-        )
-        form.addRow("Auth Mode:", self.mode_combo)
+        mode = QLabel("HMAC-SHA256 challenge-response —\n"
+                      "the password is never sent over the air.")
+        form.addRow("Auth Mode:", mode)
 
         layout.addLayout(form)
 
@@ -243,4 +238,4 @@ class _PasswordEntryDialog(QDialog):
 
     @property
     def auth_mode(self) -> str:
-        return self.mode_combo.currentText()
+        return "HMAC-SHA256"

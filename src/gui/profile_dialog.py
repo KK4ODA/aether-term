@@ -7,11 +7,10 @@ from typing import Dict, Any
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
-    QLineEdit, QComboBox, QCheckBox, QPushButton, QSpinBox,
-    QListWidget, QListWidgetItem, QDialogButtonBox,
+    QLineEdit, QComboBox, QPushButton, QSpinBox, QListWidget,
     QGroupBox, QMessageBox, QLabel,
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import pyqtSignal
 
 from gui.theme import connect_profile_btn_style
 

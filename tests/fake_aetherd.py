@@ -240,6 +240,9 @@ class FakeAetherd:
             c.sendall(b"OK\r")
             if self.state["state"] == "connected":
                 self.state.update(state="idle", remote=None)
-                c.sendall(b"DISCONNECTED\r")
+                # VARA HF keys the radio to send its disconnect frames
+                c.sendall(b"PTT ON\r")
+                time.sleep(0.2)
+                c.sendall(b"PTT OFF\rDISCONNECTED\r")
         else:
             c.sendall(b"OK\r")

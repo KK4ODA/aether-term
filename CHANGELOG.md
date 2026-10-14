@@ -5,6 +5,67 @@ Format: [version] — YYYY-MM-DD, then a bulleted list of changes.
 
 ---
 
+## [1.1.8] — 2026-10-14
+
+A cleanup release: dead code removed, duplicated code merged, and the bugs
+found along the way fixed. See `CODEBASE_AUDIT.md` for the full findings.
+
+### Fixed
+
+- **Settings and saved passwords are never overwritten after a read error.**
+  A `settings.json` that failed to parse, or a `passwords.enc` that failed
+  to decrypt, used to be replaced at the next save, losing every profile or
+  password. The unreadable file is now kept as `*.unreadable-<time>`, startup
+  says so, and both files are written safely (temporary file, then rename).
+- **VARA HF Disconnect keys the radio for the disconnect frames.** PTT was
+  released before the DISCONNECT went to VARA, so the other station never
+  heard the link end.
+- **Connecting from the Profiles window uses the profile.** Closing the
+  window reset the profile just connected, so the call went out under the
+  global callsign, with the wrong saved password and no tactical address.
+- **Soundmodem:**
+  - If Soundmodem quits or crashes, the session now ends instead of showing as
+    connected.
+  - An unanswered call is cancelled on the air after 60 s (it was 30 s, and
+    Soundmodem kept calling).
+  - Disconnect while calling cancels the call.
+  - A timeout from an earlier call no longer fails the next one.
+- **Radio PTT (OmniRig, Hamlib, FLrig):**
+  - A rig that answers too slowly is reported as not connected instead of
+    "PTT connected".
+  - Keying still queued when PTT stops can no longer key the radio afterwards.
+  - Hamlib: rigctld can no longer stall on its own messages, a late reply is
+    not taken as the answer to the next command, and a rigctld that fails to
+    start says why.
+  - FLrig calls have their own timeout.
+- **Git installs:**
+  - "Update & Restart" restarts again (it relaunched a relative path and
+    never came back).
+  - A failed update gives local changes back.
+  - A clone ahead of GitHub is no longer told there is an update.
+- **Installed builds:**
+  - A failed installer download leaves no files behind.
+  - The update dialog can't be closed mid-download.
+  - A startup failure is shown in a dialog.
+- **Text and settings:**
+  - "Enter password:" no longer shows during automatic login on slow links.
+  - Accented characters split between two radio frames display correctly.
+  - Settings → Max Retries now takes effect.
+  - A modem path you clear stays cleared.
+- **Hamlib download:**
+  - Archive entries that point outside the install folder are refused.
+  - The download no longer falls back to unverified TLS.
+  - The rigctld path is filled in after an install.
+
+### Removed
+
+- The "plaintext fallback" setting and auth mode. They said a password would
+  be sent in plaintext if HMAC failed; nothing ever did, and nothing should.
+- Unused code: the radio clients' frequency/mode API, unused signals,
+  methods and settings defaults, and the pyserial dependency.
+
+---
+
 ## [1.1.7] — 2026-10-14
 
 ### Fixed

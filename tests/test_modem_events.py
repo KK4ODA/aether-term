@@ -137,3 +137,47 @@ def test_informational_lines_change_nothing(modem, line):
     modem._handle_event(line)
     assert modem.state == ConnectionState.DISCONNECTED
     assert set(modem.got) <= {"command_event"}
+
+
+def test_utf8_character_split_between_reads(qapp):
+    """A multi-byte character cut in two by TCP used to arrive as two
+    replacement characters; the reader now joins it up."""
+    import socket
+    import threading
+    import time
+    from conftest import pump
+    from vara.modem import VARAModem
+
+    m = VARAModem()
+    texts = []
+    m.data_received.connect(texts.append)
+    ours, theirs = socket.socketpair()
+    reader = threading.Thread(target=m._data_reader, args=(ours,))
+    reader.start()
+    theirs.sendall("Café ".encode()[:4])             # "Caf" + first byte of é
+    time.sleep(0.1)
+    theirs.sendall("Café ".encode()[4:] + b"73\r\n")
+    time.sleep(0.1)
+    theirs.close()
+    reader.join(2)
+    pump(qapp, until=lambda: "".join(texts).endswith("\r\n"))
+    assert "".join(texts) == "Café 73\r\n"
+    ours.close()
+
+
+def test_a_reader_of_a_closed_connection_does_not_end_the_next_one(qapp):
+    """The command reader of an earlier connection, waking up after a new
+    connection has started, must not report "Lost connection" for it."""
+    import socket
+    from vara.modem import VARAModem
+
+    m = VARAModem()
+    errors = []
+    m.error_signal.connect(errors.append)
+    old, old_peer = socket.socketpair()
+    m._cmd_sock, peer = socket.socketpair()           # the current connection
+    old_peer.close()                                  # old link ends
+    m._cmd_reader(old)                                # returns at once
+    assert m._cmd_sock is not None and not errors
+    for s in (old, m._cmd_sock, peer):
+        s.close()

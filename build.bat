@@ -87,7 +87,7 @@ echo [2/5] Installing dependencies (this may take a minute)...
 
 !PY! -m pip install --upgrade pip >nul 2>&1
 
-!PY! -m pip install pyinstaller PyQt6 cryptography pyserial keyring pywin32 certifi --quiet 2>nul
+!PY! -m pip install pyinstaller -r requirements.txt --quiet 2>nul
 
 echo        Dependencies OK
 

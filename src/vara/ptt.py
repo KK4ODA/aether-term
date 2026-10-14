@@ -1,19 +1,19 @@
 """
-vara/ptt.py — PTT control for Aether Term (VARA HF only).
+vara/ptt.py — PTT control for Aether Term.
 
-VARA FM controls PTT internally through its own settings.
-VARA HF sends "PTT ON" / "PTT OFF" events on the command port and
-expects the connecting application to physically key the radio.
+VARA HF (and Aether HF set to "host program" keying) sends "PTT ON" /
+"PTT OFF" on the command port and expects the connecting program to key
+the radio.  VARA FM, Soundmodem and Aether HF otherwise key it themselves.
 
-Supported HF PTT methods:
+Supported methods (the ``hf_ptt_method`` setting):
   - OmniRig  (Windows COM automation)
   - Hamlib   (rigctld over TCP)
   - FLrig    (XML-RPC, port 12345)
-  - VOX      (no-op fallback)
+  - VOX      (nothing to do: the radio keys itself on audio)
 
-This module provides a PTTController that listens for PTT signals
-from the VARAModem and delegates to the configured backend.  Includes
-a safety watchdog that releases PTT if the modem stops communicating.
+PTTController keys the chosen rig client on the modem's PTT events, in
+the order they came, and releases the radio if the modem goes quiet
+while keyed (watchdog) or when it is stopped.
 """
 
 import logging
@@ -22,7 +22,7 @@ import threading
 import time
 from typing import Optional
 
-from PyQt6.QtCore import QObject, Qt, pyqtSignal
+from PyQt6.QtCore import QObject, pyqtSignal
 
 log = logging.getLogger(__name__)
 
@@ -31,12 +31,37 @@ log = logging.getLogger(__name__)
 WATCHDOG_TIMEOUT = 90.0
 
 
+def _make_rig(method: str, config):
+    """The rig client for an ``hf_ptt_method`` setting (not yet started)."""
+    from config import PTT_FLRIG, PTT_HAMLIB, PTT_OMNIRIG
+    if method == PTT_OMNIRIG:
+        from vara.omnirig import OmniRigClient
+        return OmniRigClient(rig_number=config.get("omnirig_rig_number", 1))
+    if method == PTT_HAMLIB:
+        from vara.hamlib import HamlibClient
+        return HamlibClient(
+            host=config.get("hamlib_rigctld_host", "127.0.0.1"),
+            port=config.get("hamlib_rigctld_port", 4532),
+            rig_model=config.get("hamlib_rig_model", 1),
+            device=config.get("hamlib_device", ""),
+            serial_speed=config.get("hamlib_serial_speed", 0),
+            auto_launch=config.get("hamlib_auto_launch", True),
+            rigctld_path=config.get("hamlib_rigctld_path", ""),
+            extra_args=config.get("hamlib_extra_args", ""),
+        )
+    if method == PTT_FLRIG:
+        from vara.flrig import FLrigClient
+        return FLrigClient(host=config.get("flrig_host", "127.0.0.1"),
+                           port=config.get("flrig_port", 12345))
+    raise ValueError(f"Unknown PTT method: {method}")
+
+
 class PTTController(QObject):
-    """Bridges VARA HF PTT events to OmniRig, Hamlib or FLrig radio control.
+    """Keys a rig client (OmniRig, Hamlib or FLrig) on the modem's PTT events.
 
     Signals:
-        ptt_changed(bool)   — emitted when PTT state changes (for GUI indicator)
-        ptt_error(str)      — emitted on PTT hardware errors
+        ptt_changed(bool)   — PTT state changed (for the GUI indicator)
+        ptt_error(str)      — a rig could not be started or keyed
     """
 
     ptt_changed = pyqtSignal(bool)
@@ -44,16 +69,10 @@ class PTTController(QObject):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._omnirig = None
-        self._hamlib = None
-        self._flrig = None
-        self._backend = "omnirig"  # "omnirig", "hamlib", or "flrig"
+        self._rig = None                 # a started RigClient, or None
+        self._name = ""
         self._ptt_on = False
-        self._enabled = False
-        self._shared_hamlib = False  # True if hamlib client is owned externally
-        self._shared_flrig = False   # True if flrig client is owned externally
-        self._rig_number = 1
-        self.last_error = ""        # why the last start_method() failed
+        self.last_error = ""             # why the last start_method() failed
         self._watchdog: Optional[threading.Timer] = None
         self._lock = threading.Lock()
         # Radio keying runs on one worker thread, in the order the modem
@@ -64,219 +83,79 @@ class PTTController(QObject):
 
     @property
     def is_enabled(self) -> bool:
-        return self._enabled
+        return self._rig is not None
 
     @property
     def ptt_on(self) -> bool:
         return self._ptt_on
 
-    def start(self, rig_number: int = 1) -> bool:
-        """Connect to OmniRig and prepare for PTT control.
-
-        Returns True on success, False if OmniRig is unavailable.
-        """
-        self._rig_number = rig_number
-
-        try:
-            from vara.omnirig import OmniRigClient
-            self._omnirig = OmniRigClient(rig_number=rig_number)
-            self._omnirig.start()
-            self._backend = "omnirig"
-            self._enabled = True
-            log.info(f"PTT controller started (OmniRig Rig{rig_number})")
-            return True
-        except ImportError:
-            log.warning("pywin32 not installed — OmniRig PTT unavailable")
-            self.ptt_error.emit(
-                "OmniRig requires pywin32. Install with: pip install pywin32")
-            return False
-        except RuntimeError as e:
-            log.error(f"OmniRig start failed: {e}")
-            self.ptt_error.emit(str(e))
-            return False
-
     def start_method(self, method: str, config) -> bool:
-        """Start the backend for an ``hf_ptt_method`` setting.
+        """Start the rig client for an ``hf_ptt_method`` setting.
 
-        Returns True when the radio can be keyed, False when the method's
-        backend is unavailable (``ptt_error`` says why).  A controller left
-        running from an earlier call is stopped first.
+        Returns True when the radio can be keyed, False when it cannot
+        (``last_error`` and ``ptt_error`` say why).  A rig left running
+        from an earlier call is stopped first.
         """
-        from config import PTT_FLRIG, PTT_HAMLIB, PTT_OMNIRIG
-        if self._enabled:
-            self.stop()
+        self.stop()
         self.last_error = ""
-        errors: list[str] = []
-        self.ptt_error.connect(errors.append, Qt.ConnectionType.DirectConnection)
         try:
-            if method == PTT_OMNIRIG:
-                ok = self.start(rig_number=config.get("omnirig_rig_number", 1))
-            elif method == PTT_HAMLIB:
-                ok = self.start_hamlib(config)
-            elif method == PTT_FLRIG:
-                ok = self.start_flrig(config)
-            else:
-                self.ptt_error.emit(f"Unknown PTT method: {method}")
-                ok = False
-        finally:
-            self.ptt_error.disconnect(errors.append)
-        if not ok:
-            self.last_error = errors[-1] if errors else f"{method} unavailable"
-        return ok
-
-    def start_hamlib(self, config) -> bool:
-        """Connect to Hamlib rigctld for PTT control.
-
-        Returns True on success, False if Hamlib is unavailable.
-        """
-        try:
-            from vara.hamlib import HamlibClient
-            self._hamlib = HamlibClient(
-                host=config.get("hamlib_rigctld_host", "127.0.0.1"),
-                port=config.get("hamlib_rigctld_port", 4532),
-                rig_model=config.get("hamlib_rig_model", 1),
-                device=config.get("hamlib_device", ""),
-                serial_speed=config.get("hamlib_serial_speed", 0),
-                auto_launch=config.get("hamlib_auto_launch", True),
-                rigctld_path=config.get("hamlib_rigctld_path", ""),
-                extra_args=config.get("hamlib_extra_args", ""),
-            )
-            self._hamlib.start()
-            self._backend = "hamlib"
-            self._enabled = True
-            self._shared_hamlib = False
-            log.info("PTT controller started (Hamlib rigctld)")
-            return True
-        except ImportError as e:
-            log.warning(f"Hamlib module not available: {e}")
-            self.ptt_error.emit(f"Hamlib module error: {e}")
+            rig = _make_rig(method, config)
+            rig.start()
+        except (ImportError, RuntimeError, ValueError) as e:
+            self.last_error = str(e) or f"{method} unavailable"
+            log.error(f"{method} PTT start failed: {self.last_error}")
+            self.ptt_error.emit(self.last_error)
             return False
-        except RuntimeError as e:
-            log.error(f"Hamlib start failed: {e}")
-            self.ptt_error.emit(str(e))
-            return False
+        self.use_rig(rig, method)
+        return True
 
-    def use_hamlib_client(self, client) -> None:
-        """Share an existing HamlibClient for PTT (avoids double-launching rigctld).
-
-        The caller owns the client lifecycle — stop() will NOT be called
-        on it by the PTT module.
-        """
-        self._hamlib = client
-        self._backend = "hamlib"
-        self._enabled = True
-        self._shared_hamlib = True
-        log.info("PTT controller using shared Hamlib client")
-
-    def start_flrig(self, config) -> bool:
-        """Connect to FLrig's XML-RPC server for PTT control.
-
-        Returns True on success, False if FLrig is unavailable.
-        """
-        try:
-            from vara.flrig import FLrigClient
-            self._flrig = FLrigClient(
-                host=config.get("flrig_host", "127.0.0.1"),
-                port=config.get("flrig_port", 12345),
-            )
-            self._flrig.start()
-            self._backend = "flrig"
-            self._enabled = True
-            self._shared_flrig = False
-            log.info("PTT controller started (FLrig XML-RPC)")
-            return True
-        except ImportError as e:
-            log.warning(f"FLrig module not available: {e}")
-            self.ptt_error.emit(f"FLrig module error: {e}")
-            return False
-        except RuntimeError as e:
-            log.error(f"FLrig start failed: {e}")
-            self.ptt_error.emit(str(e))
-            return False
-
-    def use_flrig_client(self, client) -> None:
-        """Share an existing FLrigClient for PTT (avoids double-connecting).
-
-        The caller owns the client lifecycle — stop() will NOT be called
-        on it by the PTT module.
-        """
-        self._flrig = client
-        self._backend = "flrig"
-        self._enabled = True
-        self._shared_flrig = True
-        log.info("PTT controller using shared FLrig client")
+    def use_rig(self, rig, name: str):
+        """Key *rig*, an already started rig client, from now on."""
+        self._rig = rig
+        self._name = name
+        log.info(f"PTT controller started ({name})")
 
     def stop(self):
-        """Release PTT and disconnect from the active backend."""
-        import traceback
-        caller = ''.join(traceback.format_stack()[-3:-1]).strip()
-        log.info(f"PTT stop() called from:\n{caller}")
-
+        """Release PTT and close the rig client."""
         self._cancel_watchdog()
-        self.wait_idle(timeout=3.0)         # queued keying runs before we release
-        with self._lock:
-            if self._ptt_on:
-                try:
-                    if self._backend == "flrig" and self._flrig:
-                        self._flrig.set_ptt(False)
-                    elif self._backend == "hamlib" and self._hamlib:
-                        self._hamlib.set_ptt(False)
-                    elif self._omnirig:
-                        self._omnirig.set_ptt(False)
-                except Exception as e:
-                    log.warning(f"Failed to release PTT during stop: {e}")
-                self._ptt_on = False
-
-        if self._omnirig:
+        rig = self._rig
+        if rig is None:
+            return
+        self._rig = None                 # keying still queued is dropped
+        while True:
             try:
-                self._omnirig.stop()
-            except Exception:
-                pass
-            self._omnirig = None
-
-        if self._hamlib:
-            if not self._shared_hamlib:
-                try:
-                    self._hamlib.stop()
-                except Exception:
-                    pass
-            self._hamlib = None
-            self._shared_hamlib = False
-
-        if self._flrig:
-            if not self._shared_flrig:
-                try:
-                    self._flrig.stop()
-                except Exception:
-                    pass
-            self._flrig = None
-            self._shared_flrig = False
-
-        self._enabled = False
+                self._keying.get_nowait()
+                self._keying.task_done()
+            except queue.Empty:
+                break
+        self.wait_idle(timeout=3.0)      # let a command already running finish
+        with self._lock:
+            self._ptt_on = False
+        # Unkey whatever the last command did (the rig clients unkey on
+        # close too; this one is in order behind the command just run)
+        try:
+            rig.set_ptt(False)
+        except Exception as e:
+            log.warning(f"Failed to release PTT during stop: {e}")
+        try:
+            rig.stop()
+        except Exception as e:
+            log.warning(f"{self._name} stop failed: {e}")
         log.info("PTT controller stopped")
 
     def on_ptt_event(self, ptt_on: bool):
-        """Called when VARA HF sends a PTT ON or PTT OFF event.
-
-        This is connected to the modem's ptt_event signal via
-        DirectConnection — runs on the reader thread, not the main
-        thread.  Dispatches the actual radio keying to a background
-        thread so the reader is never blocked.
-        """
-        if not self._enabled:
+        """The modem sent PTT ON (True) or PTT OFF (False)."""
+        if self._rig is None:
             log.debug(f"PTT {'ON' if ptt_on else 'OFF'} ignored (controller disabled)")
             return
 
         with self._lock:
             self._ptt_on = ptt_on
 
-        action = "KEYING" if ptt_on else "UNKEYING"
-        log.info(f"PTT {action} radio via {self._backend}")
-
+        log.info(f"PTT {'KEYING' if ptt_on else 'UNKEYING'} radio via {self._name}")
         self._queue_keying(ptt_on)
         self.ptt_changed.emit(ptt_on)
 
-        # Watchdog management
         if ptt_on:
             self._start_watchdog()
         else:
@@ -311,42 +190,17 @@ class PTTController(QObject):
         return True
 
     def _do_ptt(self, ptt_on: bool):
-        """Execute PTT command on a background thread."""
+        """Key the radio (worker thread)."""
+        rig, name = self._rig, self._name
+        if rig is None:
+            return                       # stopped meanwhile; stop() unkeys
         try:
-            if self._backend == "flrig":
-                if self._flrig and self._flrig.is_started:
-                    log.info(f"Sending set_ptt({ptt_on}) to FLrig...")
-                    ok = self._flrig.set_ptt(ptt_on)
-                    log.info(f"FLrig set_ptt({ptt_on}) → {'OK' if ok else 'FAILED'}")
-                    if not ok:
-                        self.ptt_error.emit("FLrig PTT command failed")
-                else:
-                    started = self._flrig.is_started if self._flrig else 'no client'
-                    log.warning(f"FLrig not connected (started={started}) "
-                                f"— PTT command dropped")
-                    self.ptt_error.emit("FLrig not connected")
-            elif self._backend == "hamlib":
-                if self._hamlib and self._hamlib.is_started:
-                    log.info(f"Sending set_ptt({ptt_on}) to rigctld...")
-                    ok = self._hamlib.set_ptt(ptt_on)
-                    log.info(f"rigctld set_ptt({ptt_on}) → {'OK' if ok else 'FAILED'}")
-                    if not ok:
-                        self.ptt_error.emit("Hamlib PTT command failed")
-                else:
-                    started = self._hamlib.is_started if self._hamlib else 'no client'
-                    log.warning(f"Hamlib not connected (started={started}) "
-                                f"— PTT command dropped")
-                    self.ptt_error.emit("Hamlib rigctld not connected")
-            else:
-                if self._omnirig and self._omnirig.is_started:
-                    log.info(f"Sending set_ptt({ptt_on}) to OmniRig...")
-                    ok = self._omnirig.set_ptt(ptt_on)
-                    log.info(f"OmniRig set_ptt({ptt_on}) → {'OK' if ok else 'FAILED'}")
-                    if not ok:
-                        self.ptt_error.emit("OmniRig PTT command failed")
-                else:
-                    log.warning("OmniRig not connected — PTT command dropped")
-                    self.ptt_error.emit("OmniRig not connected")
+            if not rig.is_started:
+                log.warning(f"{name} not connected — PTT command dropped")
+                self.ptt_error.emit(f"{name} not connected")
+            elif not rig.set_ptt(ptt_on):
+                log.warning(f"{name} set_ptt({ptt_on}) failed")
+                self.ptt_error.emit(f"{name} PTT command failed")
         except Exception as e:
             log.error(f"PTT error: {e}")
             self.ptt_error.emit(str(e))
@@ -377,21 +231,3 @@ class PTTController(QObject):
         self._queue_keying(False)           # behind anything already queued
         self.ptt_changed.emit(False)
         self.ptt_error.emit("PTT watchdog: forced release after timeout")
-
-    def get_status_text(self) -> str:
-        """Return a human-readable status string for the GUI."""
-        if not self._enabled:
-            return "PTT: Disabled"
-        if self._backend == "flrig":
-            if self._flrig and self._flrig.is_started:
-                return "PTT: FLrig (XML-RPC)"
-            return "PTT: FLrig (not connected)"
-        if self._backend == "hamlib":
-            if self._hamlib and self._hamlib.is_started:
-                return "PTT: Hamlib (rigctld)"
-            return "PTT: Hamlib (not connected)"
-        else:
-            if self._omnirig and self._omnirig.is_started:
-                status_name = self._omnirig.get_status_name()
-                return f"PTT: OmniRig Rig{self._rig_number} ({status_name})"
-            return "PTT: Not connected"

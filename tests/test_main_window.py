@@ -204,6 +204,27 @@ def test_prompt_without_line_end_is_shown_after_a_pause(qapp, win):
     assert shown.count("4 Back:") == 1
 
 
+def test_password_prompt_stays_hidden_during_auto_auth(qapp, win):
+    """The slow-link partial display (1.1.3) bypassed the auth check, so
+    "Enter password:" showed during automatic HMAC login."""
+    win._target = "W1AW-5"
+    win.passwords.set_password("W1AW-5", "secret", operator=win._effective_callsign())
+    win._on_data_received(";AUTH HMAC-SHA256 " + "ab" * 16 + "\r\n")
+    win._on_data_received("Enter password: ")
+    pump(qapp, 1.5)                            # past the partial-line delay
+    assert "Enter password" not in text(win)
+    assert "Challenge received" in text(win)
+
+
+def test_short_prompt_is_shown_at_once_and_completed(qapp, win):
+    win._on_data_received("Callsign:")
+    assert text(win).endswith("Callsign:")     # no wait for a short prompt
+    win._on_data_received(" KK4ODA\r")
+    shown = text(win)
+    assert shown.endswith("Callsign: KK4ODA\n")
+    assert shown.count("Callsign:") == 1
+
+
 def test_line_split_across_frames_reads_as_one_line(qapp, win):
     """VARA splits lines at frame boundaries; a slow second half must
     continue the screen line, not start a new one or repeat the first."""
@@ -528,3 +549,64 @@ def test_profiles_and_mode_are_locked_during_a_call(qapp, win):
     assert not win._switch_mode("VARA FM")
     assert win.config.mode == "Aether HF"
     assert "Disconnect before switching" in text(win)
+
+
+def test_connect_from_profiles_window_keeps_the_profile(qapp, win, monkeypatch):
+    """Closing the Profiles window rebuilt the dropdown, which reset the
+    profile just connected: the call went out under the global callsign."""
+    from gui import main_window
+    profile = {"name": "ARES", "mode": "Aether HF", "my_callsign": "N0CALL",
+               "my_ssid": 7, "target_callsign": "KE4QCM-7"}
+    win.config.add_profile(dict(profile))
+
+    class FakeDialog:
+        def __init__(self, config, parent):
+            from PyQt6.QtCore import QObject, pyqtSignal
+
+            class S(QObject):
+                profile_connect = pyqtSignal(dict)
+            self._s = S()
+            self.profile_connect = self._s.profile_connect
+
+        def exec(self):
+            self.profile_connect.emit(dict(profile))   # its Connect button
+
+    monkeypatch.setattr(main_window, "ProfileDialog", FakeDialog)
+    calls = []
+    monkeypatch.setattr(win, "_on_connect", lambda: calls.append(win._effective_callsign()))
+    win._open_profiles()
+    assert pump(qapp, until=lambda: calls, timeout=3)
+    assert calls == ["N0CALL-7"]
+    assert win.profile_combo.currentIndex() == 1
+
+
+def test_profile_sets_fm_bandwidth_on_connect_too(qapp, win, monkeypatch):
+    monkeypatch.setattr(win, "_on_connect", lambda: None)
+    win.config.set("fm_bandwidth", "WIDE")
+    win._connect_from_profile({"mode": "VARA FM", "fm_bandwidth": "NARROW",
+                               "target_callsign": "KE4QCM-7"})
+    assert win.config.get("fm_bandwidth") == "NARROW"
+
+
+def test_max_retries_setting_reaches_the_modem(qapp, win, monkeypatch):
+    """Settings → Max Retries was saved but the modem always tried 5 times."""
+    from vara.modem import VARAModem
+    from conftest import pump
+    tries = []
+    monkeypatch.setattr(VARAModem, "_do_connect",
+                        lambda self, host, c, d, n: tries.append(n))
+    win.config.set("max_retries", 2)
+    win._on_connect()
+    assert pump(qapp, until=lambda: tries, timeout=5)
+    assert tries == [2]
+
+
+def test_macro_buttons_are_built_once_and_rebuilt(qapp, win):
+    labels = [b.text() for b in win.macro_buttons]
+    assert labels == [m["label"] for m in win.config.get_macros()]
+    win.macro_buttons[0].click()                 # not connected: refused, said so
+    assert "Not connected — command not sent." in text(win)
+    win.config.set_macros([{"label": "Mine", "command": "L"}])
+    win._refresh_macros()
+    assert [b.text() for b in win.macro_buttons] == ["Mine"]
+    assert win.macro_frame.layout().count() == 3  # "Quick:", Mine, stretch

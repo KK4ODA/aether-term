@@ -108,10 +108,12 @@ class AGWPEClient:
         host: str = "127.0.0.1",
         port: int = 8000,
         on_frame: Optional[Callable[[AGWPEFrame], None]] = None,
+        on_lost: Optional[Callable[[], None]] = None,
     ):
         self._host = host
         self._port = port
         self._on_frame = on_frame
+        self._on_lost = on_lost       # the TNC closed the link (not disconnect())
         self._sock: Optional[socket.socket] = None
         self._reader_thread: Optional[threading.Thread] = None
         self._running = False
@@ -227,13 +229,6 @@ class AGWPEClient:
             call_from=my_call, call_to=remote_call, data=data,
         ))
 
-    def request_port_info(self) -> bool:
-        """Request port information ('G' frame)."""
-        return self.send_frame(AGWPEFrame(
-            port=0, data_kind="G", pid=0,
-            call_from="", call_to="", data=b"",
-        ))
-
     # ── Background reader ─────────────────────────────────────────────
 
     def _reader_loop(self):
@@ -264,6 +259,8 @@ class AGWPEClient:
         if self._running:
             log.warning("AGWPE connection lost")
             self._running = False
+            if self._on_lost:
+                self._on_lost()
 
     def _recv_exact(self, n: int) -> Optional[bytes]:
         """Read exactly *n* bytes from the socket."""

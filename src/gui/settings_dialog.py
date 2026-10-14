@@ -13,7 +13,6 @@ from PyQt6.QtWidgets import (
     QPushButton, QLabel, QGroupBox, QFileDialog, QRadioButton,
     QButtonGroup, QDialogButtonBox, QScrollArea, QFrame,
 )
-from PyQt6.QtCore import Qt
 
 from config import PTT_FLRIG, PTT_HAMLIB, PTT_METHODS, PTT_OMNIRIG, PTT_VOX
 from gui.hamlib_settings import HamlibSettingsGroup
@@ -187,7 +186,9 @@ class SettingsDialog(QDialog):
         conn_form = QFormLayout(conn_group)
         self.max_retries_spin = QSpinBox()
         self.max_retries_spin.setRange(1, 20)
-        self.max_retries_spin.setToolTip("Maximum connection retry attempts before giving up.")
+        self.max_retries_spin.setToolTip(
+            "How many times to try reaching the modem program (VARA or\n"
+            "Aether HF) on its TCP ports, 2 s apart, before giving up.")
         conn_form.addRow("Max Retries:", self.max_retries_spin)
 
         self.session_logging_cb = QCheckBox("Enable session logging")
@@ -452,13 +453,6 @@ class SettingsDialog(QDialog):
             "No password is ever sent over RF."
         )
         opts_form.addRow(self.auto_hmac_cb)
-        self.plaintext_fallback_cb = QCheckBox("Allow plaintext fallback (with warning)")
-        self.plaintext_fallback_cb.setToolTip(
-            "If HMAC auth fails, fall back to sending the\n"
-            "password in plaintext. Less secure but compatible\n"
-            "with older BBS systems. A warning is shown."
-        )
-        opts_form.addRow(self.plaintext_fallback_cb)
         self.show_auth_cb = QCheckBox("Show auth protocol messages in terminal (debug)")
         self.show_auth_cb.setToolTip("Show the raw authentication protocol messages\nin the terminal. Useful for debugging auth issues.")
         opts_form.addRow(self.show_auth_cb)
@@ -653,7 +647,6 @@ class SettingsDialog(QDialog):
 
         # Auth tab
         self.auto_hmac_cb.setChecked(c.get("auto_respond_hmac", True))
-        self.plaintext_fallback_cb.setChecked(c.get("allow_plaintext_fallback", True))
         self.show_auth_cb.setChecked(c.get("show_auth_protocol", False))
 
         # Macros
@@ -722,7 +715,6 @@ class SettingsDialog(QDialog):
         c.set("soundmodem_exe_path", self.agwpe_exe.text())
 
         c.set("auto_respond_hmac", self.auto_hmac_cb.isChecked())
-        c.set("allow_plaintext_fallback", self.plaintext_fallback_cb.isChecked())
         c.set("show_auth_protocol", self.show_auth_cb.isChecked())
 
         # Macros

@@ -10,7 +10,7 @@ import hmac
 import logging
 import re
 from enum import Enum, auto
-from typing import Optional, Tuple
+from typing import Optional
 
 log = logging.getLogger(__name__)
 

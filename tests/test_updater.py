@@ -146,6 +146,7 @@ def test_bad_download_is_refused(qapp, tmp_path, releases_api, kwargs, message):
     r = up.check_for_updates()
     with pytest.raises(RuntimeError, match=message):
         up.download_installer(r, dest_dir=tmp_path)
+    assert not list(tmp_path.glob("*.exe"))     # nothing half-checked is left
 
 
 def test_update_dialog_downloads_runs_installer_and_quits(qapp, tmp_path, releases_api,
@@ -190,3 +191,87 @@ def test_skip_this_version(qapp, tmp_path, releases_api, home):
     dlg = UpdateDialog(r, None, lambda: None, config=cfg, can_install=False)
     dlg._skip_btn.click()
     assert cfg.get("skipped_update_version") == "v1.2.0"
+
+
+# ── Git mode (a clone run from source) ──────────────────────────────────
+
+def _git(cwd, *args):
+    import subprocess
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t",
+                    "-c", "commit.gpgsign=false", *args],
+                   cwd=cwd, check=True, capture_output=True)
+
+
+@pytest.fixture
+def clone(tmp_path):
+    """An origin repo with one commit on main, and a clone of it."""
+    import shutil
+    if not shutil.which("git"):
+        pytest.skip("git not installed")
+    origin = tmp_path / "origin"
+    origin.mkdir()
+    _git(origin, "init", "-q", "-b", "main")
+    (origin / "a.txt").write_text("1")
+    _git(origin, "add", ".")
+    _git(origin, "commit", "-q", "-m", "one")
+    _git(tmp_path, "clone", "-q", str(origin), "clone")
+    return origin, tmp_path / "clone"
+
+
+def _git_updater(path):
+    from updater import Updater
+    return Updater({}, repo_dir=path, current_version="1.0.0")
+
+
+def test_git_clone_behind_origin_is_offered_the_commits(qapp, clone):
+    origin, local = clone
+    (origin / "a.txt").write_text("2")
+    _git(origin, "commit", "-q", "-am", "two")
+    r = _git_updater(local).check_for_updates()
+    assert r.update_available and [c.subject for c in r.commits] == ["two"]
+
+
+def test_git_clone_ahead_of_origin_has_no_update(qapp, clone):
+    """Hashes differing used to mean "update available", so local work
+    (or another branch) was always offered origin/main."""
+    _, local = clone
+    (local / "b.txt").write_text("mine")
+    _git(local, "add", ".")
+    _git(local, "commit", "-q", "-m", "local work")
+    r = _git_updater(local).check_for_updates()
+    assert not r.update_available and not r.error
+
+
+def test_failed_pull_gives_local_changes_back(qapp, clone):
+    """A pull that fails used to leave the user's changes in the stash."""
+    origin, local = clone
+    (origin / "a.txt").write_text("2")
+    _git(origin, "commit", "-q", "-am", "two")
+    (local / "c.txt").write_text("x")              # local commit: no fast-forward
+    _git(local, "add", ".")
+    _git(local, "commit", "-q", "-m", "diverge")
+    (local / "a.txt").write_text("uncommitted edit")
+    result = _git_updater(local).apply_update()
+    assert not result.success
+    assert (local / "a.txt").read_text() == "uncommitted edit"
+    import subprocess
+    stash = subprocess.run(["git", "stash", "list"], cwd=local,
+                           capture_output=True, text=True).stdout
+    assert stash == ""
+
+
+def test_restart_uses_an_absolute_script_path(qapp, monkeypatch, tmp_path):
+    """Launched as "py src\\main.py", the restarted process used to look for
+    src\\src\\main.py and never came back after a git update."""
+    import os
+    import sys
+    from gui.main_window import MainWindow
+    started = []
+    monkeypatch.setattr("subprocess.Popen", lambda args, cwd=None: started.append((args, cwd)))
+    monkeypatch.setattr(sys, "argv", [os.path.join("src", "main.py")])
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("PyQt6.QtWidgets.QApplication.quit", lambda self=None: None)
+    MainWindow._restart(None)
+    args, cwd = started[0]
+    script = args[1]
+    assert os.path.isabs(script) and script.endswith(os.path.join("src", "main.py"))

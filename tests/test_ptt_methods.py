@@ -209,3 +209,57 @@ def test_settings_offer_every_ptt_method(qapp, window):
     assert again.hf_ptt_method.currentText() == "FLrig"
     assert again.flrig_port.value() == 12346
     assert again.ptt_form.isRowVisible(again.flrig_port)
+
+
+# ── Slow and hung rigs ──────────────────────────────────────────────────
+
+def test_a_rig_that_does_not_answer_in_time_is_not_started(qapp):
+    """start() used to report success when its wait ran out while the
+    I/O thread was still trying, and the call went out unkeyed."""
+    import time
+    from vara.rig_client import RigClient
+
+    class SlowRig(RigClient):
+        NAME = "Slow"
+        START_TIMEOUT = 0.3
+
+        def _open(self):
+            time.sleep(1.0)
+
+        def _key(self, on):
+            return True
+
+        def _close(self):
+            pass
+
+    rig = SlowRig()
+    with pytest.raises(RuntimeError, match="did not answer"):
+        rig.start()
+    assert not rig.is_started and not rig.set_ptt(True)
+
+
+def test_silent_rigctld_fails_to_start(qapp, home):
+    from vara.ptt import PTTController
+    fake = FakeRigctld(silent=True).start()
+    try:
+        cfg = _cfg(home, hamlib_rigctld_port=fake.port, hamlib_auto_launch=False)
+        c = PTTController()
+        assert not c.start_method("Hamlib (rigctld)", cfg)
+        assert "did not respond" in c.last_error
+    finally:
+        fake.stop()
+
+
+def test_late_rigctld_reply_is_not_read_as_the_next_answer(qapp, home, rigctld):
+    """A reply that comes after the timeout must not be taken as the answer
+    to the next command (a late "RPRT 0" for PTT ON passing as PTT OFF)."""
+    from vara.hamlib import HamlibClient
+    client = HamlibClient(port=rigctld.port)
+    client.start()
+    try:
+        rigctld.ptt_delay = 4.5                   # past the 4 s socket timeout
+        assert not client.set_ptt(True)
+        assert client.set_ptt(False)              # on a fresh connection
+        assert rigctld.ptt[-1] == 0
+    finally:
+        client.stop()

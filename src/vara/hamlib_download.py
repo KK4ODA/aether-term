@@ -38,35 +38,13 @@ USER_AGENT = "AetherTerm-HamlibUpdater/1.0"
 
 
 def _make_ssl_context():
-    """Create an SSL context that works in both source and frozen mode.
-
-    PyInstaller-frozen apps may not find the default CA bundle,
-    so we fall back to an unverified context as a last resort.
-    """
-    # Try default first
-    try:
-        ctx = ssl.create_default_context()
-        # Quick test: can we load the certs?
-        if ctx.get_ca_certs():
-            return ctx
-        return ctx  # Even if empty, might still work
-    except Exception:
-        pass
-
-    # Try certifi if available
+    """A verifying SSL context: certifi's CA bundle when available (frozen
+    builds may not find the system one), else the default."""
     try:
         import certifi
-        ctx = ssl.create_default_context(cafile=certifi.where())
-        return ctx
+        return ssl.create_default_context(cafile=certifi.where())
     except Exception:
-        pass
-
-    # Last resort: unverified (still encrypted, just no cert check)
-    log.warning("SSL: Using unverified context (no CA bundle found)")
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    return ctx
+        return ssl.create_default_context()
 
 
 class HamlibDownloader:
@@ -348,10 +326,19 @@ class HamlibDownloader:
                     name = name[len(strip_prefix):]
                 if not name:
                     continue
-                dest = self._install_dir / name
+                dest = self._dest(name)
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 with zf.open(info) as src, open(dest, "wb") as dst:
                     shutil.copyfileobj(src, dst)
+
+    def _dest(self, name: str) -> Path:
+        """Where an archive member goes — refusing names ("../x", "/x")
+        that would land outside the install folder."""
+        root = self._install_dir.resolve()
+        dest = (root / name).resolve()
+        if root not in dest.parents:
+            raise RuntimeError(f"Archive entry outside the install folder: {name}")
+        return dest
 
     def _extract_tarball(self, buf: io.BytesIO, mode: str = "r:gz"):
         """Extract a tar archive, handling nested directories."""
@@ -372,7 +359,7 @@ class HamlibDownloader:
                     name = name[len(strip_prefix):]
                 if not name:
                     continue
-                dest = self._install_dir / name
+                dest = self._dest(name)
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 f = tf.extractfile(member)
                 if f:

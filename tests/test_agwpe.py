@@ -78,3 +78,85 @@ def test_frames_are_logged_both_ways(caplog):
     assert "AGWPE TX 'v' port=0 KK4ODA-7 -> KE4QCM-7" in text
     assert "AGWPE TX 'D' port=0 KK4ODA-7 -> KE4QCM-7 pid=0xF0 len=5 b'ARES\\r'" in text
     assert "AGWPE RX 'C' port=0 KE4QCM-7 -> KK4ODA-7" in text
+
+
+# ── AGWPEModem against the fake Soundmodem ──────────────────────────────
+
+def _modem(qapp, fake):
+    from conftest import pump
+    from vara.agwpe_modem import AGWPEModem
+    from vara.connection import ConnectionState
+    m = AGWPEModem()
+    m.errors = []
+    m.error_signal.connect(m.errors.append)
+    m.connect_to_modem("127.0.0.1", fake.port)
+    assert pump(qapp, until=lambda: m.state == ConnectionState.MODEM_CONNECTED)
+    m.initialize_modem("KK4ODA-7")
+    return m
+
+
+def test_soundmodem_quitting_ends_the_session(qapp):
+    """Soundmodem closing its TCP port used to leave the window showing a
+    live session; it now reads as the modem link closing."""
+    from conftest import pump
+    from fake_agwpe import FakeAGWPE
+    from vara.connection import ConnectionState
+    fake = FakeAGWPE().start()
+    m = _modem(qapp, fake)
+    m.rf_connect("KK4ODA-7", "W1AW-5")
+    assert pump(qapp, until=lambda: m.state == ConnectionState.CONNECTED)
+    fake.stop()
+    assert pump(qapp, until=lambda: "Lost connection to Soundmodem" in m.errors)
+    assert m.state == ConnectionState.DISCONNECTED
+
+
+def test_unanswered_call_is_cancelled_on_the_air(qapp, monkeypatch):
+    from conftest import pump
+    from fake_agwpe import FakeAGWPE
+    import vara.agwpe_modem as am
+    from vara.connection import ConnectionState
+    monkeypatch.setattr(am, "CONNECT_TIMEOUT", 0.3)
+    fake = FakeAGWPE(answer_connect=False).start()
+    try:
+        m = _modem(qapp, fake)
+        m.rf_connect("KK4ODA-7", "W1AW-5")
+        assert pump(qapp, until=lambda: m.state == ConnectionState.MODEM_CONNECTED, timeout=3)
+        assert pump(qapp, until=lambda: fake.kinds().endswith("Cd"))   # cancelled
+        assert any("call cancelled" in e for e in m.errors)
+    finally:
+        fake.stop()
+
+
+def test_a_timeout_belongs_to_its_own_call(qapp, monkeypatch):
+    """The 30 s timer of an abandoned call used to fail the next call."""
+    import time
+    from conftest import pump
+    from fake_agwpe import FakeAGWPE
+    import vara.agwpe_modem as am
+    from vara.connection import ConnectionState
+    monkeypatch.setattr(am, "CONNECT_TIMEOUT", 0.5)
+    fake = FakeAGWPE(answer_connect=False).start()
+    try:
+        m = _modem(qapp, fake)
+        m.rf_connect("KK4ODA-7", "W1AW-5")
+        time.sleep(0.3)
+        m._set_state(ConnectionState.MODEM_CONNECTED)    # call abandoned
+        m.rf_connect("KK4ODA-7", "W1AW-5")               # and placed again
+        pump(qapp, 0.35)                                 # first timer fires here
+        assert m.state == ConnectionState.CONNECTING
+        assert not m.errors
+    finally:
+        fake.stop()
+
+
+def test_disconnect_while_calling_cancels_the_call(qapp):
+    from conftest import pump
+    from fake_agwpe import FakeAGWPE
+    fake = FakeAGWPE(answer_connect=False).start()
+    try:
+        m = _modem(qapp, fake)
+        m.rf_connect("KK4ODA-7", "W1AW-5")
+        m.disconnect_from_modem()
+        assert pump(qapp, until=lambda: "d" in fake.kinds())
+    finally:
+        fake.stop()

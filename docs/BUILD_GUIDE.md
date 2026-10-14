@@ -21,6 +21,7 @@ When it finishes you'll find these in the `dist\` folder:
 | File | What it is |
 |------|------------|
 | `dist\Aether_Term_Setup_<version>.exe` | Installer (Start Menu, uninstaller, the works). Upgrades an existing VARA Term install in place |
+| `dist\Aether_Term_Setup_<version>.zip` | The installer, zipped |
 | `dist\Aether_Term_Portable_<version>.zip` | Portable zip (extract anywhere, run `Aether Term.exe`) |
 | `dist\Aether Term\Aether Term.exe` | Raw build output (used by the above two) |
 
@@ -29,9 +30,10 @@ When it finishes you'll find these in the `dist\` folder:
 ## Cloud builds
 
 PyInstaller doesn't cross-compile, so a Windows .exe must be built on Windows. The GitHub
-Actions workflow (`.github/workflows/build_release.yml`) does this on a Windows runner when a
-release is created, and attaches a portable zip to the release. The installer is still built
-locally with `build.bat`, because it needs Inno Setup.
+Actions workflow (`.github/workflows/build_release.yml`) does this on a Windows runner: it
+installs Inno Setup, builds the program, the installer, the zipped installer and the portable
+zip, and attaches all three to the release (see `docs/RELEASE_CHECKLIST.md`). Run without a
+tag, it is a dry run that keeps the files as workflow artifacts.
 
 ---
 
@@ -58,4 +60,4 @@ nothing from Aether HF goes into this build.
 → Add the module name to `hiddenimports` in `aether_term.spec` and rebuild.
 
 **App icon**
-→ Drop a `resources\aether_term.ico` file (256×256 multi-size .ico), uncomment the `icon=` line in `aether_term.spec` and `SetupIconFile` in `installer.iss`, rebuild.
+→ There is no icon yet. To add one: put a 256×256 multi-size `aether_term.ico` in the repository root, add `icon='aether_term.ico'` to the `EXE(...)` call in `aether_term.spec`, set `SetupIconFile=aether_term.ico` (and `UninstallDisplayIcon`) in `installer.iss`, and rebuild.

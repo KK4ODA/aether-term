@@ -22,12 +22,11 @@ import logging
 import os
 from typing import Optional
 
-from PyQt6.QtCore import Qt, pyqtSignal, QThread
+from PyQt6.QtCore import pyqtSignal, QThread
 from PyQt6.QtWidgets import (
     QGroupBox, QFormLayout, QHBoxLayout, QVBoxLayout,
     QLineEdit, QSpinBox, QComboBox, QCheckBox, QPushButton,
-    QLabel, QFileDialog, QDialog, QProgressBar, QDialogButtonBox,
-    QTextEdit,
+    QLabel, QFileDialog, QDialog, QProgressBar, QTextEdit,
 )
 
 log = logging.getLogger(__name__)
@@ -147,11 +146,11 @@ class HamlibSettingsGroup(QGroupBox):
 
     def _open_download_dialog(self):
         dlg = HamlibDownloadDialog(self.config, parent=self)
-        if dlg.exec() == QDialog.DialogCode.Accepted:
-            # Update version label and rigctld path if auto-detected
-            self._update_version_label()
-            if dlg.installed_rigctld_path:
-                self.rigctld_path.setText(dlg.installed_rigctld_path)
+        dlg.exec()
+        # The dialog only closes (never "accepts"): look at what it installed
+        self._update_version_label()
+        if dlg.installed_rigctld_path:
+            self.rigctld_path.setText(dlg.installed_rigctld_path)
 
     def _update_version_label(self):
         try:
