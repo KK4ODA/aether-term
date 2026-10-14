@@ -76,3 +76,12 @@ def test_password_store_identifiers_unchanged():
     import passwords
     assert passwords._SERVICE_NAME == "VARA Term"
     assert passwords._KEYRING_KEY == "vterm_master_key"
+
+
+def test_new_configs_do_not_share_profile_lists(home):
+    """A profile added to one fresh Config used to land in the module's
+    defaults, and so in every Config created after it."""
+    from config import Config, DEFAULT_SETTINGS
+    Config().add_profile({"name": "X"})
+    assert Config().get_profiles() == []
+    assert DEFAULT_SETTINGS["profiles"] == []

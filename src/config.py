@@ -4,6 +4,7 @@ config.py — Configuration management for Aether Term.
 Loads/saves settings from a JSON file in the user's app data directory.
 """
 
+import copy
 import json
 import os
 import shutil
@@ -188,7 +189,8 @@ class Config:
     def __init__(self):
         self._dir = _app_data_dir()
         self._path = self._dir / "settings.json"
-        self._data: Dict[str, Any] = dict(DEFAULT_SETTINGS)
+        # Deep copy: the default lists (profiles, macros) must not be shared
+        self._data: Dict[str, Any] = copy.deepcopy(DEFAULT_SETTINGS)
         self.load()
 
     # ── persistence ─────────────────────────────────────────────────

@@ -111,6 +111,9 @@ class MainWindow(QMainWindow):
         self._transport_query_pending = False
         self._active_profile: Optional[dict] = None
         self._rf_session_up = False    # a CONNECTED was seen for this call
+        self._target = ""              # the station being called
+        self._via: list = []           # its digipeater path
+        self._prev_state = ConnectionState.DISCONNECTED
 
         # Aether HF control-API status monitor (only runs in Aether HF mode)
         self.aether = AetherMonitor(self)
@@ -678,8 +681,8 @@ class MainWindow(QMainWindow):
         """Send the CONNECT command to initiate the RF link."""
         if self.modem.state != ConnectionState.MODEM_CONNECTED:
             return
-        target = getattr(self, '_target', '')
-        via = getattr(self, '_via', [])
+        target = self._target
+        via = self._via
         callsign = self._effective_callsign()
 
         self.terminal.display.append_system(f"Initiating RF connection to {target}...")
@@ -699,11 +702,11 @@ class MainWindow(QMainWindow):
                 remote = parts[0]
             else:
                 # Neither matches exactly — use the target we requested
-                remote = getattr(self, '_target', parts[0])
+                remote = self._target or parts[0]
         elif len(parts) == 1:
             remote = parts[0]
         else:
-            remote = getattr(self, '_target', 'UNKNOWN')
+            remote = self._target or 'UNKNOWN'
 
         self._rf_session_up = True
         via = getattr(self.modem, "connected_via", [])
@@ -857,38 +860,32 @@ class MainWindow(QMainWindow):
             shown, self._partial_shown = self._partial_shown, ""
             self._process_line(line, shown)
 
-        # Handle partial data (prompt characters like "> ")
-        if self._data_buffer:
-            # Check if it looks like a prompt (short, ends with space or >)
-            if len(self._data_buffer) < 10 and (
-                    self._data_buffer.rstrip().endswith(">") or
-                    self._data_buffer.rstrip().endswith(":")):
-                prompt = self._data_buffer
-                self._data_buffer = ""
-                # Auth interceptor might want to suppress ">" prompts during auth
-                action = self.auth.process_line(
-                    prompt,
-                    self.passwords.get_password(getattr(self, '_target', ''), self._effective_callsign()),
-                    self.config.get("auto_respond_hmac", True),
-                    self.config.get("show_auth_protocol", False),
-                )
-                if not action.suppress:
-                    self.terminal.display.append_text(
-                        prompt[len(self._partial_shown):], "normal")
-                self._partial_shown = ""
-
-        # VARA hands data over a radio frame at a time, often mid-line, so a
-        # piece is only shown once nothing more has come for a moment.
-        if self._data_buffer:
+        # An unfinished line: a short prompt ("> ", "Callsign:") is shown
+        # at once; anything else once the BBS has been quiet for a moment —
+        # VARA hands data over a radio frame at a time, often mid-line.
+        buf = self._data_buffer
+        if buf and len(buf) < 10 and buf.rstrip().endswith((">", ":")):
+            self._partial_timer.stop()
+            self._show_partial_line()
+        elif buf:
             self._partial_timer.start()
         else:
             self._partial_timer.stop()
 
     def _show_partial_line(self):
-        """Show the unfinished line the BBS has stopped at (a prompt)."""
+        """Show the unfinished line the BBS has stopped at (a prompt).
+
+        The text stays in the buffer: when the rest of the line comes, the
+        whole line is processed and only the new part is displayed.
+        """
         buf = self._data_buffer
         if not buf or buf.startswith(";") or buf == self._partial_shown:
             return                          # ;protocol lines stay hidden
+        if self.auth.process_line(
+                buf, self.passwords.get_password(self._target, self._effective_callsign()),
+                self.config.get("auto_respond_hmac", True),
+                self.config.get("show_auth_protocol", False)).suppress:
+            return                          # the password prompt during auto-auth
         self.terminal.display.append_text(buf[len(self._partial_shown):], "normal")
         self._partial_shown = buf
 
@@ -919,7 +916,7 @@ class MainWindow(QMainWindow):
         self._check_chat_enter(line)
         self._check_chat_exit(line)
 
-        target = getattr(self, '_target', '')
+        target = self._target
         password = self.passwords.get_password(target, self._effective_callsign())
 
         action = self.auth.process_line(
@@ -1033,15 +1030,14 @@ class MainWindow(QMainWindow):
         # CANCELPENDING, rejected CONNECT, or a session that ended) is the
         # end of that connect sequence too — unlike the INITIALIZING →
         # MODEM_CONNECTED step that precedes the CONNECT.
-        prev = getattr(self, "_prev_state", None)
-        self._prev_state = state
+        prev, self._prev_state = self._prev_state, state
         if (state == ConnectionState.MODEM_CONNECTED
                 and prev in (ConnectionState.CONNECTING,
                              ConnectionState.CONNECTED,
                              ConnectionState.DISCONNECTING)):
             if prev == ConnectionState.CONNECTING and self._connect_in_progress:
                 self.terminal.display.append_warning(
-                    f"Connection to {getattr(self, '_target', '')} failed "
+                    f"Connection to {self._target} failed "
                     "— closing the modem link.")
             self._connect_in_progress = False
 
@@ -1107,7 +1103,7 @@ class MainWindow(QMainWindow):
                 f"[MODEM] Command rejected: WRONG{cmd_hint}")
         elif upper == "CANCELPENDING":
             self.terminal.display.append_warning("[MODEM] Connection attempt cancelled")
-        elif upper == "LINK UNREGISTERED" and getattr(self, "_via", []):
+        elif upper == "LINK UNREGISTERED" and self._via:
             self.terminal.display.append_warning(
                 "[MODEM] VARA reports this link as unregistered — VARA FM "
                 "requires a VARA license to connect through digipeaters.")
@@ -1213,6 +1209,12 @@ class MainWindow(QMainWindow):
             self.setWindowTitle(f"{APP_NAME} — {APP_TAGLINE}")
 
     def _refresh_profiles(self):
+        """Rebuild the profile dropdown after the Profiles window.
+
+        Without selecting anything: a profile connected from that window
+        is already active, and the rebuild must not reset it.
+        """
+        self.profile_combo.blockSignals(True)
         self.profile_combo.clear()
         self.profile_combo.addItem("(none)")
         for i, p in enumerate(self.config.get_profiles(), 1):
@@ -1250,27 +1252,35 @@ class MainWindow(QMainWindow):
                 parts.append(f"[{tactical}]")
             label = f"{i}: {' | '.join(parts)}"
             self.profile_combo.addItem(label)
+            if p == self._active_profile:
+                self.profile_combo.setCurrentIndex(i)
+        self.profile_combo.blockSignals(False)
 
     def _on_profile_selected(self, index: int):
-        if index <= 0:
+        profiles = self.config.get_profiles()
+        if 0 < index <= len(profiles):
+            self._apply_profile(profiles[index - 1])
+        else:
             self._active_profile = None
             self._update_title()
-            return
-        profiles = self.config.get_profiles()
-        if 0 <= index - 1 < len(profiles):
-            p = profiles[index - 1]
-            self._active_profile = p
-            self._update_title()
-            self.target_input.setCurrentText(p.get("target_callsign", ""))
-            self._set_via(self.via1_input, p.get("via1", ""))
-            self._set_via(self.via2_input, p.get("via2", ""))
 
-            self._switch_mode(p.get("mode", "VARA FM"))
-            self._apply_profile_bandwidth(p)
-            fm_bw = p.get("fm_bandwidth", "WIDE")
-            self.config.set("fm_bandwidth", fm_bw)
-            self._sync_aether_monitor()
-            self._update_ui_state()
+    def _apply_profile(self, p: dict) -> Optional[bool]:
+        """Make *p* the active profile: operator, target, path, mode and
+        bandwidth.  Returns whether the mode changed, or None when it
+        could not change (a call is under way)."""
+        mode = p.get("mode", MODE_VARA_FM)
+        switched = self._switch_mode(mode)
+        if mode != self.config.mode:
+            return None
+        self._active_profile = p
+        self._update_title()
+        self.target_input.setCurrentText(p.get("target_callsign", ""))
+        self._set_via(self.via1_input, p.get("via1", ""))
+        self._set_via(self.via2_input, p.get("via2", ""))
+        self._apply_profile_bandwidth(p)
+        self._sync_aether_monitor()
+        self._update_ui_state()
+        return switched
 
     # ── Session logging ────────────────────────────────────────────
 
@@ -1652,18 +1662,9 @@ class MainWindow(QMainWindow):
         self._refresh_profiles()
 
     def _connect_from_profile(self, profile: dict):
-        self._active_profile = profile
-        self._update_title()
-        self.target_input.setCurrentText(profile.get("target_callsign", ""))
-        self._set_via(self.via1_input, profile.get("via1", ""))
-        self._set_via(self.via2_input, profile.get("via2", ""))
-        mode = profile.get("mode", "VARA FM")
-        switched = self._switch_mode(mode)
-        if mode != self.config.mode:
+        switched = self._apply_profile(profile)
+        if switched is None:
             return                          # a call is under way
-        self._apply_profile_bandwidth(profile)
-        self._sync_aether_monitor()
-        self._update_ui_state()
         delay = 200
         if switched and self._auto_launch_on():
             # The modem program just launched needs a few seconds to listen
@@ -1755,7 +1756,9 @@ class MainWindow(QMainWindow):
     def _apply_profile_bandwidth(self, profile: dict):
         """Set the HF bandwidth a profile asks for, for its modem."""
         mode = profile.get("mode", MODE_VARA_FM)
-        if mode == MODE_VARA_HF:
+        if mode == MODE_VARA_FM:
+            self.config.set("fm_bandwidth", profile.get("fm_bandwidth", "WIDE"))
+        elif mode == MODE_VARA_HF:
             self.config.set("hf_bandwidth", profile.get("bandwidth", 500))
         elif mode == MODE_AETHER_HF:
             bw = 500 if int(profile.get("bandwidth", 2300)) == 500 else 2300
@@ -1819,7 +1822,7 @@ class MainWindow(QMainWindow):
 
     def _explain_aether_no_session(self):
         """The call ended without a session — say why, if the modem knows."""
-        target = getattr(self, "_target", "the target")
+        target = self._target or "the target"
         self.aether_query.snapshot(
             self.config.aether_control_url,
             lambda st: self._explain_aether_no_session_with(st, target))
