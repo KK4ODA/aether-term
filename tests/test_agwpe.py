@@ -106,8 +106,8 @@ def test_soundmodem_quitting_ends_the_session(qapp):
     m.rf_connect("KK4ODA-7", "W1AW-5")
     assert pump(qapp, until=lambda: m.state == ConnectionState.CONNECTED)
     fake.stop()
-    assert pump(qapp, until=lambda: m.state == ConnectionState.DISCONNECTED)
-    assert "Lost connection to Soundmodem" in m.errors
+    assert pump(qapp, until=lambda: "Lost connection to Soundmodem" in m.errors)
+    assert m.state == ConnectionState.DISCONNECTED
 
 
 def test_unanswered_call_is_cancelled_on_the_air(qapp, monkeypatch):

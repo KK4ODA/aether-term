@@ -102,8 +102,9 @@ class AGWPEModem(QObject):
         """
         self._set_state(ConnectionState.INITIALIZING)
         self._my_call = callsign.upper()
-        if self._client:
-            self._client.register_callsign(self._my_call)
+        client = self._client
+        if client:
+            client.register_callsign(self._my_call)
             self.command_event.emit(f"Registered callsign {self._my_call}")
         self._set_state(ConnectionState.MODEM_CONNECTED)
 
@@ -124,11 +125,12 @@ class AGWPEModem(QObject):
         path = f" VIA {' '.join(digis)}" if digis else ""
         self.command_event.emit(f"CONNECT {self._my_call} {self._target}{path}")
 
-        if self._client:
+        client = self._client
+        if client:
             if digis:
-                self._client.connect_station_via(self._my_call, self._target, digis)
+                client.connect_station_via(self._my_call, self._target, digis)
             else:
-                self._client.connect_station(self._my_call, self._target)
+                client.connect_station(self._my_call, self._target)
 
         # No 'C' frame in time: cancel the call.  The timer belongs to this
         # call only — a later call must not be failed by it.
@@ -142,8 +144,9 @@ class AGWPEModem(QObject):
         if call_id != self._call_id or self._state != ConnectionState.CONNECTING:
             return
         # Stop Soundmodem calling on the air, then give up
-        if self._client:
-            self._client.disconnect_station(self._my_call, self._target)
+        client = self._client
+        if client:
+            client.disconnect_station(self._my_call, self._target)
         self.error_signal.emit(
             f"No answer from {self._target} in {CONNECT_TIMEOUT:.0f} s — call cancelled")
         self._set_state(ConnectionState.MODEM_CONNECTED)
@@ -158,31 +161,32 @@ class AGWPEModem(QObject):
 
     def rf_disconnect(self):
         """Disconnect the AX.25 session."""
-        if self._client and self._rf_connected:
-            self._client.disconnect_station(self._my_call, self._target)
+        client = self._client
+        if client and self._rf_connected:
+            client.disconnect_station(self._my_call, self._target)
             self._set_state(ConnectionState.DISCONNECTING)
             self.command_event.emit("DISCONNECT sent")
 
     def send_data(self, text: str):
         """Send text data over the AX.25 connection."""
-        if self._client and self._rf_connected:
-            data = text.encode("utf-8")
-            self._client.send_connected_data(
-                self._my_call, self._target, data,
-            )
+        client = self._client
+        if client and self._rf_connected:
+            client.send_connected_data(
+                self._my_call, self._target, text.encode("utf-8"))
         else:
             log.warning(f"AGWPE data not sent (no link): {text[:80]!r}")
 
     def disconnect_from_modem(self):
         """Close the entire AGWPE TCP connection."""
-        if self._client:
+        # Taken once: the reader thread clears _client if Soundmodem goes away
+        client, self._client = self._client, None
+        if client:
             # Also a call still being placed: Soundmodem would go on
             # calling on the air, and might connect with nobody here.
             if self._rf_connected or self._state == ConnectionState.CONNECTING:
-                self._client.disconnect_station(self._my_call, self._target)
-            self._client.unregister_callsign(self._my_call)
-            self._client.disconnect()
-            self._client = None
+                client.disconnect_station(self._my_call, self._target)
+            client.unregister_callsign(self._my_call)
+            client.disconnect()
         self._rf_connected = False
         self._call_id += 1
         self._set_state(ConnectionState.DISCONNECTED)
