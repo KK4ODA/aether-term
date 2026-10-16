@@ -8,8 +8,10 @@ monitor, and the authentication interceptor.
 
 import logging
 import os
+import re
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -62,6 +64,19 @@ VIA_WIDTH_SAMPLE = "WD5EMA-15"     # the widest call the boxes must show
 # often mid-line, a second or more apart on a slow link.
 PARTIAL_LINE_DELAY_MS = 1000
 
+# How long after sending ;TRANSPORT? the BBS's answer is taken as the
+# reply to it, and hidden: a VARA FM round trip takes a few seconds, a
+# slow HF link longer.  Only the first ;TRANSPORT line counts.
+TRANSPORT_REPLY_WINDOW_S = 20.0
+
+# A BBS protocol line sent straight after a prompt that had no line end:
+# the BBS sends "> " and waits, then ";TRANSPORT VARA_FM" or ";AUTH OK"
+# arrives on what is, here, the same line.
+_PROTOCOL_AFTER_PROMPT = re.compile(
+    r"^(.{0,24}?>\s?)(;(?:AUTH|TRANSPORT|TACTICAL|WLREG)\b.*)$")
+# ...and the start of one, in a line not finished yet
+_PROTOCOL_START_AFTER_PROMPT = re.compile(r"^(.{0,24}?>\s?);")
+
 # Connecting from a profile that switched modes: time for the modem program
 # just launched to open its ports.
 MODEM_START_DELAY_MS = 5000
@@ -109,6 +124,8 @@ class MainWindow(QMainWindow):
         self._data_ended_cr = False       # last data chunk ended in CR
         self._remote_eol = ""             # BBS line end once seen: "\r\n", "\r" or "\n"
         self._transport_query_pending = False
+        self._transport_reply_until = 0.0  # ;TRANSPORT? sent, reply hidden until then
+        self._reprompt: Optional[tuple] = None  # (prompt, "\n" + prompt) to drop
         self._active_profile: Optional[dict] = None
         self._rf_session_up = False    # a CONNECTED was seen for this call
         self._target = ""              # the station being called
@@ -413,6 +430,11 @@ class MainWindow(QMainWindow):
         self.modem_status_label = QLabel("Modem: Not connected")
         self.status_bar.addPermanentWidget(self.modem_status_label)
 
+        self.transport_label = QLabel("")
+        self.transport_label.setToolTip(
+            "The link type the BBS reports for this session (;TRANSPORT).")
+        self.status_bar.addPermanentWidget(self.transport_label)
+
         # Aether HF status from its control API (hidden in other modes)
         self.aether_label = QLabel("")
         self.aether_label.setToolTip("Aether HF modem status (control API).\nClick for details.")
@@ -586,6 +608,8 @@ class MainWindow(QMainWindow):
         # command.
         self._remote_eol = ""
         self._transport_query_pending = True
+        self._transport_reply_until = 0.0
+        self.transport_label.setText("")
         self.speed_label.setText("Speed: —")
         self._cleanup_timer.stop()  # cancel any stale cleanup timer
 
@@ -717,6 +741,7 @@ class MainWindow(QMainWindow):
         self._data_buffer = ""
         self._data_ended_cr = False
         self._partial_shown = ""
+        self._reprompt = None
 
         # Start session timer
         self._session_start = datetime.now(timezone.utc)
@@ -846,17 +871,12 @@ class MainWindow(QMainWindow):
             text = text[1:]
         self._data_ended_cr = text.endswith("\r")
         self._data_buffer += text.replace("\r\n", "\n").replace("\r", "\n")
-
-        # Process complete lines
-        while "\n" in self._data_buffer:
-            line, self._data_buffer = self._data_buffer.split("\n", 1)
-            shown, self._partial_shown = self._partial_shown, ""
-            self._process_line(line, shown)
+        self._take_lines()
 
         # An unfinished line: a short prompt ("> ", "Callsign:") is shown
         # at once; anything else once the BBS has been quiet for a moment —
         # VARA hands data over a radio frame at a time, often mid-line.
-        buf = self._data_buffer
+        buf = self._unfinished_line()
         if buf and len(buf) < 10 and buf.rstrip().endswith((">", ":")):
             self._partial_timer.stop()
             self._show_partial_line()
@@ -865,13 +885,71 @@ class MainWindow(QMainWindow):
         else:
             self._partial_timer.stop()
 
+    def _take_lines(self):
+        """Process the complete lines in the buffer.
+
+        A protocol line that follows a prompt with no line end ("> " then
+        ";AUTH OK") is processed as a line of its own, the prompt as
+        another.  The reply to our ;TRANSPORT? is hidden, and the prompt
+        before it stays the unfinished line on screen.
+        """
+        while True:
+            if self._reprompt and not self._drop_reprompt():
+                return                      # more of the new prompt may come
+            if "\n" not in self._data_buffer:
+                return
+            line, rest = self._data_buffer.split("\n", 1)
+            m = _PROTOCOL_AFTER_PROMPT.match(line)
+            prompt, proto = (m.group(1), m.group(2)) if m else ("", line)
+            if self._is_transport_reply(proto):
+                self._data_buffer = prompt + rest
+                self._on_transport_reply(proto)
+                if prompt:
+                    # The BBS follows its answer with a fresh prompt
+                    # ("\r\n> "); the one on screen stands for it.
+                    self._reprompt = (prompt, "\n" + prompt)
+                continue
+            self._data_buffer = rest
+            shown, self._partial_shown = self._partial_shown, ""
+            if m:
+                self._process_line(prompt, shown)
+                self._process_line(proto)
+            else:
+                self._process_line(line, shown)
+
+    def _drop_reprompt(self) -> bool:
+        """Drop the line end and prompt that follow a hidden ;TRANSPORT
+        reply, when they repeat the prompt already on screen.
+
+        False while the data so far could still be them.  (During login
+        the BBS sends no new prompt: anything else ends the wait.)
+        """
+        prompt, repeat = self._reprompt
+        after = self._data_buffer[len(prompt):]
+        if after.startswith(repeat):
+            self._data_buffer = prompt + after[len(repeat):]
+        elif repeat.startswith(after):
+            return False
+        self._reprompt = None
+        return True
+
+    def _unfinished_line(self) -> str:
+        """The part of the unfinished line that may be shown: not a
+        protocol line just starting after a prompt, nor a prompt that may
+        be about to be dropped as a repeat."""
+        if self._reprompt:
+            return self._reprompt[0]
+        buf = self._data_buffer
+        m = _PROTOCOL_START_AFTER_PROMPT.match(buf)
+        return m.group(1) if m else buf
+
     def _show_partial_line(self):
         """Show the unfinished line the BBS has stopped at (a prompt).
 
         The text stays in the buffer: when the rest of the line comes, the
         whole line is processed and only the new part is displayed.
         """
-        buf = self._data_buffer
+        buf = self._unfinished_line()
         if not buf or buf.startswith(";") or buf == self._partial_shown:
             return                          # ;protocol lines stay hidden
         if self.auth.process_line(
@@ -895,11 +973,6 @@ class MainWindow(QMainWindow):
             self.terminal.display.append_text("\n", "normal")
             self._log_line(line)
             return
-        # Transport auto-detection (suppress from display)
-        if self._handle_transport_response(line):
-            self._log_line(line)
-            return
-
         # Tactical address response (suppress protocol lines from display)
         if self._handle_tactical_response(line):
             self._log_line(line)
@@ -1916,15 +1989,28 @@ class MainWindow(QMainWindow):
 
     def _query_transport(self):
         """Send ;TRANSPORT? to detect the BBS transport type."""
+        if self.modem.state != ConnectionState.CONNECTED:
+            return
         self.modem.send_data(";TRANSPORT?\r\n")
+        self._transport_reply_until = time.monotonic() + TRANSPORT_REPLY_WINDOW_S
 
-    def _handle_transport_response(self, line: str) -> bool:
-        """Check if a line is a ;TRANSPORT response.  Returns True if handled."""
-        if line.startswith(";TRANSPORT "):
-            self.terminal.display.append_system(
-                f"BBS transport: {line[11:].strip()}")
-            return True
-        return False
+    def _is_transport_reply(self, line: str) -> bool:
+        """Whether *line* answers our ;TRANSPORT? (the first ;TRANSPORT
+        line soon after it).  Any other ;TRANSPORT line is shown."""
+        if not line.startswith(";TRANSPORT ") or not self._transport_reply_until:
+            return False
+        if time.monotonic() > self._transport_reply_until:
+            self._transport_reply_until = 0.0
+            return False
+        return True
+
+    def _on_transport_reply(self, line: str):
+        """The BBS answered ;TRANSPORT?: show its link type in the status bar."""
+        self._transport_reply_until = 0.0
+        label = line[len(";TRANSPORT "):].strip()
+        log.info(f"BBS transport: {label}")
+        self.transport_label.setText(f"BBS link: {label}")
+        self._log_line(line)
 
     # ── Tactical address ──────────────────────────────────────────────
 

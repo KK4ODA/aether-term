@@ -238,11 +238,111 @@ def test_line_split_across_frames_reads_as_one_line(qapp, win):
 
 
 def test_protocol_lines_are_never_shown_half_way(qapp, win):
+    win._on_data_received(";TACTICAL O")
+    pump(qapp, 1.3)
+    assert ";TACTICAL" not in text(win)
+    win._on_data_received("K W1AW-5\r\n")
+    assert "Address activated: W1AW-5" in text(win)
+
+
+# ── The answer to ;TRANSPORT? ────────────────────────────────────────
+
+def _expect_transport_reply(win):
+    """As if ;TRANSPORT? had just gone out."""
+    win._transport_reply_until = time.monotonic() + 20
+
+
+def test_transport_reply_is_hidden_and_the_prompt_shown_once(qapp, win):
+    """The BBS answers ;TRANSPORT? after its "> " prompt, then prompts again:
+    the screen showed "> ;TRANSPORT VARA_FM", a blank line and "> "."""
+    win.fake.state["prompt"] = True
+    win.fake.state["transport_reply"] = [b";TRANSPORT AET", b"HER_HF\r", b"\n\r", b"\n", b"> "]
+    win._on_connect()
+    assert pump(qapp, until=lambda: "Welcome to the test BBS" in text(win), timeout=15)
+    assert pump(qapp, until=lambda: win.transport_label.text() == "BBS link: AETHER_HF")
+    pump(qapp, 0.3)
+    shown = text(win)
+    assert ";TRANSPORT" not in shown
+    assert shown.endswith("Welcome to the test BBS\n> ")
+    win._send_text("H")
+    assert pump(qapp, until=lambda: "Help: L R S B" in text(win))
+    tail = text(win).split("Welcome to the test BBS")[-1]
+    assert tail.count("> ") == 2, tail          # the prompt, and the echo of H
+
+
+def test_transport_reply_in_one_read_with_other_text(qapp, win):
+    win._on_data_received("Welcome\r\n> ")
+    _expect_transport_reply(win)
+    win._on_data_received(";TRANSPORT VARA_FM\r\n\r\n> ")
+    assert text(win).endswith("Welcome\n> ")
+    assert win.transport_label.text() == "BBS link: VARA_FM"
+    # Text either side of the hidden line still shows
+    win._on_data_received("before\r\n")
+    _expect_transport_reply(win)
+    win._on_data_received("News 1\r\n;TRANSPORT VARA_FM\r\nNews 2\r\n")
+    shown = text(win)
+    assert shown.endswith("> before\nNews 1\nNews 2\n")
+    assert ";TRANSPORT" not in shown
+
+
+def test_other_text_after_a_hidden_reply_is_kept(qapp, win):
+    win._on_data_received("> ")
+    _expect_transport_reply(win)
+    win._on_data_received(";TRANSPORT VARA_FM\r\n")
+    win._on_data_received("\r")
+    win._on_data_received("\nNew mail\r\n> ")
+    assert text(win).endswith("> \nNew mail\n> ")
+    assert ";TRANSPORT" not in text(win)
+
+
+def test_transport_line_later_in_the_session_is_shown(qapp, win):
+    win._on_data_received("> ")
+    _expect_transport_reply(win)
+    win._on_data_received(";TRANSPORT VARA_FM\r\n\r\n> ")
+    win._on_data_received("\r\n;TRANSPORT VARA_HF\r\n")    # the first was the answer
+    assert ";TRANSPORT VARA_HF" in text(win)
+    _expect_transport_reply(win)
+    win._transport_reply_until = time.monotonic() - 1        # asked too long ago
+    win._on_data_received(";TRANSPORT AETHER_HF\r\n")
+    assert ";TRANSPORT AETHER_HF" in text(win)
+    assert ";TRANSPORT VARA_FM" not in text(win)
+    assert win.transport_label.text() == "BBS link: VARA_FM"
+
+
+def test_transport_reply_while_the_password_prompt_is_up(qapp, win):
+    """Logging in, the BBS answers ;TRANSPORT? after its "> " and sends
+    no new prompt; ;AUTH OK follows."""
+    win._target = "W1AW-5"
+    win.passwords.set_password("W1AW-5", "secret", operator=win._effective_callsign())
+    win._on_data_received(";AUTH HMAC-SHA256 " + "ab" * 16 + "\r\n"
+                          "Enter password (or HMAC client will respond automatically):\r\n")
+    win._on_data_received("> ")
+    _expect_transport_reply(win)
     win._on_data_received(";TRANSPORT VA")
     pump(qapp, 1.3)
-    assert ";TRANSPORT" not in text(win)
-    win._on_data_received("RA FM\r\n")
-    assert "BBS transport: VARA FM" in text(win)
+    win._on_data_received("RA_FM\r\n")
+    pump(qapp, 1.3)
+    win._on_data_received(";AUTH OK\r\nWelcome, KK4ODA\r\n> ")
+    shown = text(win)
+    assert "Authentication successful" in shown
+    assert ";TRANSPORT" not in shown and ";AUTH" not in shown
+    assert "Enter password" not in shown
+    assert shown.endswith("Welcome, KK4ODA\n> ")
+    assert win.transport_label.text() == "BBS link: VARA_FM"
+
+
+def test_auth_result_straight_after_the_hidden_prompt_is_understood(qapp, win):
+    """The "> " after the password prompt waits without a line end, so
+    ";AUTH OK" arrived as "> ;AUTH OK": shown raw, login never noted."""
+    win._target = "W1AW-5"
+    win.passwords.set_password("W1AW-5", "secret", operator=win._effective_callsign())
+    win._on_data_received(";AUTH HMAC-SHA256 " + "ab" * 16 + "\r\n"
+                          "Enter password (or HMAC client will respond automatically):\r\n> ")
+    pump(qapp, 1.3)
+    win._on_data_received(";AUTH OK\r\n")
+    shown = text(win)
+    assert "Authentication successful" in shown
+    assert ";AUTH OK" not in shown
 
 
 def _reopen(qapp, win):
