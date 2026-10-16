@@ -26,6 +26,7 @@ Aether Term is a PyQt6 desktop application for connecting to amateur radio BBS s
 - Configurable macro buttons with BBS command reference
 - Real-time S/N graph, session logging, dark theme terminal
 - Internet connectivity status from the BBS
+- **Local test mode** — test a BBS on the same PC with no radio or modem (below)
 
 ## Quick Start
 
@@ -37,6 +38,29 @@ Aether Term is a PyQt6 desktop application for connecting to amateur radio BBS s
 
 A one-line installer for Windows (clones the repository, installs dependencies, creates a
 desktop shortcut) is on the [project page](https://kk4oda.github.io/aether-term/).
+
+## Local test (no radio)
+
+Test your Aether BBS from Aether Term on the same PC, with no radio or modem. The BBS reaches
+VARA FM through VARA's TCP host interface; in local test mode Aether Term plays that modem,
+listening on `127.0.0.1` only (command port `8500`, data port `8501` by default — not
+8300/8301, which the real VARA uses). Nothing is transmitted. The session itself runs through
+the same code as on the air (`;TRANSPORT?`, HMAC login and the rest), so what you see in local
+test is what a station on the air gets.
+
+1. In **Aether Term**, choose **Local test** in the toolbar (or **Settings → Terminal Setup →
+   Modem → Local test (no radio)**). The status bar shows *waiting for the BBS on 8500/8501*
+   and the title bar says *LOCAL TEST — not on the air*.
+2. In **Aether BBS**, open **Settings → Instances** and add an instance: Name *Local test*,
+   Transport *VARA FM*, Host `127.0.0.1`, Cmd port `8500`, Data port `8501`, Auto Start off.
+   Save, then start or enable it. The BBS tries to reach the modem 5 times over about 15
+   seconds and then gives up; if Aether Term wasn't ready, start the instance again from the
+   BBS dashboard. Aether Term's status bar then shows *&lt;BBS call&gt; attached on 8500/8501*.
+3. Press **Connect**. Aether Term calls the BBS that attached, whatever the target box says.
+
+**Settings → Modem Configuration → Local test** sets the two ports and the callsign you
+connect as (empty: your own) — for example your sysop call, or a stranger's such as `N0CALL`
+to see what an unknown station gets.
 
 ## Using Aether HF
 

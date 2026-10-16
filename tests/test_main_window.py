@@ -331,6 +331,14 @@ def test_transport_reply_while_the_password_prompt_is_up(qapp, win):
     assert win.transport_label.text() == "BBS link: VARA_FM"
 
 
+def test_quoted_protocol_line_in_a_message_is_just_text(qapp, win):
+    win._on_data_received("> ")
+    win._on_data_received("\r\nMsg 12 from W1XYZ:\r\n> ;AUTH OK\r\n> ;TRANSPORT VARA_FM\r\n")
+    shown = text(win)
+    assert "> ;AUTH OK\n> ;TRANSPORT VARA_FM\n" in shown
+    assert "Authentication successful" not in shown
+
+
 def test_auth_result_straight_after_the_hidden_prompt_is_understood(qapp, win):
     """The "> " after the password prompt waits without a line end, so
     ";AUTH OK" arrived as "> ;AUTH OK": shown raw, login never noted."""

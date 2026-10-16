@@ -59,6 +59,7 @@ hiddenimports = [
     'vara.hamlib',
     'vara.hamlib_download',
     'vara.flrig',
+    'vara.local_test',
     'vara.agwpe',
     'vara.agwpe_modem',
     'aether',
