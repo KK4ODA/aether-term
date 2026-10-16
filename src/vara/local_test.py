@@ -167,10 +167,16 @@ class LocalTestModem(QObject):
                 self.bbs_listening = False
             log.info("Local test: BBS attached")
             self.bbs_status.emit(True, self._attached_text())
-            reader = threading.Thread(target=self._data_reader, args=(data, cmd),
+            # Either port closing ends both readers.  (A shutdown() from
+            # another thread does not wake a blocked recv() on Windows, so
+            # the readers poll this instead.)
+            gone = threading.Event()
+            reader = threading.Thread(target=self._data_reader,
+                                      args=(data, cmd, gone),
                                       daemon=True, name="LocalTestData")
             reader.start()
-            self._cmd_reader(cmd)
+            self._cmd_reader(cmd, gone)
+            gone.set()
             reader.join(timeout=2)
             self._bbs_gone(cmd)
 
@@ -235,13 +241,21 @@ class LocalTestModem(QObject):
 
     # ── The BBS's side: command and data ports ───────────────────────
 
-    def _cmd_reader(self, sock: socket.socket):
-        buf = ""
-        while not self._stop.is_set():
+    def _recv(self, sock: socket.socket, size: int, gone: threading.Event) -> bytes:
+        """The next bytes from *sock*; b"" once it or the other port is gone."""
+        while not (self._stop.is_set() or gone.is_set()):
             try:
-                chunk = sock.recv(1024)
-            except OSError:
-                return
+                ready, _, _ = select.select([sock], [], [], POLL)
+                if ready:
+                    return sock.recv(size)
+            except (OSError, ValueError):
+                break
+        return b""
+
+    def _cmd_reader(self, sock: socket.socket, gone: threading.Event):
+        buf = ""
+        while True:
+            chunk = self._recv(sock, 1024, gone)
             if not chunk:
                 return
             buf += chunk.decode("ascii", errors="replace")
@@ -285,13 +299,11 @@ class LocalTestModem(QObject):
         except OSError as e:
             log.warning(f"Local test: command port send failed: {e}")
 
-    def _data_reader(self, data: socket.socket, cmd: socket.socket):
+    def _data_reader(self, data: socket.socket, cmd: socket.socket,
+                     gone: threading.Event):
         decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
-        while not self._stop.is_set():
-            try:
-                chunk = data.recv(4096)
-            except OSError:
-                break
+        while True:
+            chunk = self._recv(data, 4096, gone)
             if not chunk:
                 break
             if self._state != ConnectionState.CONNECTED:
@@ -303,11 +315,7 @@ class LocalTestModem(QObject):
             if text:
                 self.data_received.emit(text)
             self._reply(cmd, "BUFFER 0")
-        # A port closed: wake the command reader so the BBS counts as gone
-        try:
-            cmd.shutdown(socket.SHUT_RDWR)
-        except OSError:
-            pass
+        gone.set()                  # the command reader ends too
 
     # ── The terminal's side: what VARAModem offers the window ────────
 
