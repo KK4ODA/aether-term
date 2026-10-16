@@ -59,6 +59,9 @@ class FakeAetherd:
                                          # to, bare-CR line ends
             "version_reply": f"VERSION Aether HF {VERSION}",
             "status_delay": 0.0,         # seconds before /v1/status answers
+            "prompt": False,             # Aether BBS: follow the welcome with "> "
+            # The BBS's answer to ;TRANSPORT?, sent in these pieces
+            "transport_reply": [b";TRANSPORT AETHER_HF\r\n", b"\r\n> "],
         }
         self.commands: list[str] = []
         self.raw_commands = bytearray()   # exactly what arrived, terminators and all
@@ -170,7 +173,10 @@ class FakeAetherd:
             self._conns[:] = [c, d]
             c.sendall(b"BUFFER 0\r")
             threading.Thread(target=self._data_loop, args=(d,), daemon=True).start()
-            self._cmd_loop(c, d)
+            try:
+                self._cmd_loop(c, d)
+            except OSError:
+                pass                    # the window hung up mid-answer
             self._conns.clear()
             for s in (c, d):
                 try:
@@ -187,7 +193,11 @@ class FakeAetherd:
             if not b:
                 return
             self.data.append(b)
-            if b.strip().upper() == b"H":
+            if b.strip() == b";TRANSPORT?" and self.state["bbs"] != "bpq":
+                for piece in self.state["transport_reply"]:
+                    d.sendall(piece)
+                    time.sleep(0.15)
+            elif b.strip().upper() == b"H":
                 if self.state["bbs"] == "bpq":
                     d.sendall(b"STONEM:KE4QCM-7} Help file not found\r")
                 else:
@@ -233,7 +243,12 @@ class FakeAetherd:
                 c.sendall(b"ENCRYPTION DISABLED\rLINK REGISTERED\r")
                 c.sendall(b"BITRATE (9) 1450 BPS\r")
                 if self.state["bbs"] != "bpq":
-                    d.sendall(b"Welcome to the test BBS\r\n")
+                    time.sleep(0.2)     # a BBS answers after the link is up
+                    try:
+                        d.sendall(b"Welcome to the test BBS\r\n"
+                                  + (b"> " if self.state["prompt"] else b""))
+                    except OSError:
+                        pass            # the test already hung up
             else:
                 c.sendall(b"DISCONNECTED\r")
         elif up == "DISCONNECT":

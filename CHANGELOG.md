@@ -5,6 +5,31 @@ Format: [version] — YYYY-MM-DD, then a bulleted list of changes.
 
 ---
 
+## [1.1.9] — 2026-10-16
+
+### Added
+
+- **Local test mode: talk to a BBS on this PC with no radio.** Choose
+  *Local test* in the toolbar. Aether Term listens on 127.0.0.1 (ports
+  8500/8501 by default) as a VARA FM modem, and a BBS instance set up for
+  local test attaches to it; Connect then reports an inbound call to the
+  BBS and the session runs through the same code as on the air. The
+  callsign to connect as can be chosen (Settings → Modem Configuration →
+  Local test, which also says how to set the BBS up). The title bar and
+  status bar say it is local test.
+
+### Fixed
+
+- **The BBS's answer to `;TRANSPORT?` is no longer shown.** The screen
+  showed `> ;TRANSPORT VARA_FM`, a blank line and a second `> `. The
+  answer is now hidden (its link type is in the status bar) and the
+  prompt shows once. A `;TRANSPORT` line at any other time still shows.
+- **Login is noted when `;AUTH OK` follows the hidden password prompt.**
+  It arrived as `> ;AUTH OK` and was shown raw; the "Authentication
+  successful" message and the tactical address that follows it were lost.
+
+---
+
 ## [1.1.8] — 2026-10-14
 
 A cleanup release: dead code removed, duplicated code merged, and the bugs

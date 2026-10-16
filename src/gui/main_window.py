@@ -8,8 +8,10 @@ monitor, and the authentication interceptor.
 
 import logging
 import os
+import re
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -23,7 +25,8 @@ from PyQt6.QtGui import QAction, QDesktopServices
 from PyQt6.QtCore import Qt, QRect, QTimer, QUrl, pyqtSlot
 
 from config import (Config, APP_NAME, APP_VERSION, MODE_VARA_FM,
-                    MODE_VARA_HF, MODE_AETHER_HF, MODE_AGWPE, PTT_OMNIRIG, PTT_VOX)
+                    MODE_VARA_HF, MODE_AETHER_HF, MODE_AGWPE, MODE_LOCAL_TEST,
+                    PTT_OMNIRIG, PTT_VOX)
 from aether.control import (AetherMonitor, AetherQuery, AetherStatus,
                             find_aether_exe, AETHER_RELEASES_URL,
                             AETHER_HOST_GUIDE_URL)
@@ -62,6 +65,16 @@ VIA_WIDTH_SAMPLE = "WD5EMA-15"     # the widest call the boxes must show
 # often mid-line, a second or more apart on a slow link.
 PARTIAL_LINE_DELAY_MS = 1000
 
+# How long after sending ;TRANSPORT? the BBS's answer is taken as the
+# reply to it, and hidden: a VARA FM round trip takes a few seconds, a
+# slow HF link longer.  Only the first ;TRANSPORT line counts.
+TRANSPORT_REPLY_WINDOW_S = 20.0
+
+# BBS protocol lines that can follow a prompt the BBS waited at: it sends
+# "> " with no line end, then ";TRANSPORT VARA_FM" or ";AUTH OK" arrives
+# on what is, here, the same line.
+_PROTOCOL_LINE = re.compile(r";(?:AUTH|TRANSPORT|TACTICAL|WLREG)\b")
+
 # Connecting from a profile that switched modes: time for the modem program
 # just launched to open its ports.
 MODEM_START_DELAY_MS = 5000
@@ -74,9 +87,15 @@ _MODES = [
     ("VARA HF", MODE_VARA_HF),
     ("Aether HF", MODE_AETHER_HF),
     ("Soundmodem", MODE_AGWPE),
+    ("Local test", MODE_LOCAL_TEST),
 ]
 _MODE_INDEX = {value: i for i, (_, value) in enumerate(_MODES)}
-_MODE_LABEL = {MODE_AGWPE: "Soundmodem (AGWPE)"}
+_MODE_LABEL = {MODE_AGWPE: "Soundmodem (AGWPE)",
+               MODE_LOCAL_TEST: "Local test (no radio)"}
+
+# Shown in the title bar in local test mode, so it is never taken for a
+# session on the air
+LOCAL_TEST_TITLE = "LOCAL TEST — not on the air"
 
 
 class MainWindow(QMainWindow):
@@ -109,11 +128,15 @@ class MainWindow(QMainWindow):
         self._data_ended_cr = False       # last data chunk ended in CR
         self._remote_eol = ""             # BBS line end once seen: "\r\n", "\r" or "\n"
         self._transport_query_pending = False
+        self._transport_reply_until = 0.0  # ;TRANSPORT? sent, reply hidden until then
+        self._reprompt: Optional[tuple] = None  # (prompt, "\n" + prompt) to drop
+        self._held_prompt = ""         # a bare "> " the BBS is waiting at
         self._active_profile: Optional[dict] = None
         self._rf_session_up = False    # a CONNECTED was seen for this call
         self._target = ""              # the station being called
         self._via: list = []           # its digipeater path
         self._prev_state = ConnectionState.DISCONNECTED
+        self._bbs_shown = ""           # local test: last BBS status shown
 
         # Aether HF control-API status monitor (only runs in Aether HF mode)
         self.aether = AetherMonitor(self)
@@ -143,6 +166,7 @@ class MainWindow(QMainWindow):
         self._fit_via_boxes()
         self._update_ui_state()
         self._show_welcome()
+        self._sync_local_test()
 
         self.aether.status_updated.connect(
             self._on_aether_status, Qt.ConnectionType.QueuedConnection)
@@ -307,7 +331,8 @@ class MainWindow(QMainWindow):
         self.mode_combo.setObjectName("modeCombo")
         self.mode_combo.setToolTip(
             "Switch between VARA FM, VARA HF, Aether HF and\n"
-            "Soundmodem (AGWPE) transport modes.")
+            "Soundmodem (AGWPE) transport modes, or Local test:\n"
+            "a BBS on this PC, no radio.")
         self.mode_combo.addItems([label for label, _ in _MODES])
         self.mode_combo.setCurrentIndex(_MODE_INDEX.get(self.config.mode, 0))
         self.mode_combo.currentIndexChanged.connect(self._on_mode_switched)
@@ -413,6 +438,11 @@ class MainWindow(QMainWindow):
         self.modem_status_label = QLabel("Modem: Not connected")
         self.status_bar.addPermanentWidget(self.modem_status_label)
 
+        self.transport_label = QLabel("")
+        self.transport_label.setToolTip(
+            "The link type the BBS reports for this session (;TRANSPORT).")
+        self.status_bar.addPermanentWidget(self.transport_label)
+
         # Aether HF status from its control API (hidden in other modes)
         self.aether_label = QLabel("")
         self.aether_label.setToolTip("Aether HF modem status (control API).\nClick for details.")
@@ -480,6 +510,10 @@ class MainWindow(QMainWindow):
                 Qt.ConnectionType.QueuedConnection)
             self.modem.version_report.connect(
                 self._on_version_report, Qt.ConnectionType.QueuedConnection)
+        # Local test mode: the BBS attaching and going
+        if hasattr(self.modem, "bbs_status"):
+            self.modem.bbs_status.connect(
+                self._on_bbs_status, Qt.ConnectionType.QueuedConnection)
         # HF PTT: modem emits ptt_event → PTT controller keys/unkeys radio
         self.modem.ptt_event.connect(self.ptt.on_ptt_event,
                                       Qt.ConnectionType.QueuedConnection)
@@ -504,6 +538,20 @@ class MainWindow(QMainWindow):
             return
 
         target = self.target_input.currentText().upper().strip()
+        bbs_call = getattr(self.modem, "bbs_call", "") if self.config.is_local_test else ""
+        if bbs_call:
+            # Local test calls the BBS that attached, whatever the box says
+            # (and its saved password is the one to use)
+            if target and target != bbs_call:
+                self.terminal.display.append_system(
+                    f"Local test: calling {bbs_call}, the BBS attached here")
+            target = bbs_call
+            self.target_input.setCurrentText(target)
+        if not target and self.config.is_local_test:
+            self.terminal.display.append_warning(
+                "Local test: no BBS has attached yet — start its local test "
+                "instance first.")
+            return
         if not target:
             QMessageBox.warning(self, "Missing Target",
                                 "Please enter the target BBS callsign.")
@@ -586,13 +634,21 @@ class MainWindow(QMainWindow):
         # command.
         self._remote_eol = ""
         self._transport_query_pending = True
+        self._transport_reply_until = 0.0
+        self.transport_label.setText("")
         self.speed_label.setText("Speed: —")
         self._cleanup_timer.stop()  # cancel any stale cleanup timer
 
         # Save target to recent stations history immediately
         self._add_to_target_history(target)
 
-        if is_agwpe:
+        if self.config.is_local_test:
+            self._sync_local_test()
+            self.terminal.display.append_system(
+                "Local test: no radio — the BBS on this PC "
+                f"({self.modem.cmd_port}/{self.modem.data_port})")
+            self.modem.connect_to_modem()
+        elif is_agwpe:
             # Switch to AGWPE modem
             self._swap_modem_agwpe()
             host = self.config.get("soundmodem_host", "127.0.0.1")
@@ -640,9 +696,10 @@ class MainWindow(QMainWindow):
     @pyqtSlot()
     def _on_modem_connected(self):
         """TCP link to modem is up — now initialize it."""
-        self.terminal.display.append_system("TCP connection to modem established")
-        self.modem_status_label.setText("Modem: Connected")
-        self.modem_status_label.setStyleSheet(f"color: {C['success']};")
+        if not self.config.is_local_test:        # its label shows the BBS
+            self.terminal.display.append_system("TCP connection to modem established")
+            self.modem_status_label.setText("Modem: Connected")
+            self.modem_status_label.setStyleSheet(f"color: {C['success']};")
 
         # RF CONNECT is sent when init completes (state → MODEM_CONNECTED).
         # A one-shot connection avoids the old fixed-timer race where
@@ -717,6 +774,8 @@ class MainWindow(QMainWindow):
         self._data_buffer = ""
         self._data_ended_cr = False
         self._partial_shown = ""
+        self._reprompt = None
+        self._held_prompt = ""
 
         # Start session timer
         self._session_start = datetime.now(timezone.utc)
@@ -846,17 +905,18 @@ class MainWindow(QMainWindow):
             text = text[1:]
         self._data_ended_cr = text.endswith("\r")
         self._data_buffer += text.replace("\r\n", "\n").replace("\r", "\n")
-
-        # Process complete lines
-        while "\n" in self._data_buffer:
-            line, self._data_buffer = self._data_buffer.split("\n", 1)
-            shown, self._partial_shown = self._partial_shown, ""
-            self._process_line(line, shown)
+        self._take_lines()
+        # A bare prompt left waiting: a protocol line may follow it
+        buf = self._data_buffer
+        if buf.strip() == ">":
+            self._held_prompt = buf
+        elif not (self._held_prompt and buf.startswith(self._held_prompt)):
+            self._held_prompt = ""
 
         # An unfinished line: a short prompt ("> ", "Callsign:") is shown
         # at once; anything else once the BBS has been quiet for a moment —
         # VARA hands data over a radio frame at a time, often mid-line.
-        buf = self._data_buffer
+        buf = self._unfinished_line()
         if buf and len(buf) < 10 and buf.rstrip().endswith((">", ":")):
             self._partial_timer.stop()
             self._show_partial_line()
@@ -865,13 +925,86 @@ class MainWindow(QMainWindow):
         else:
             self._partial_timer.stop()
 
+    def _take_lines(self):
+        """Process the complete lines in the buffer.
+
+        A protocol line that follows the bare prompt the BBS was waiting
+        at ("> " then ";AUTH OK") is processed as a line of its own, the
+        prompt as another.  The reply to our ;TRANSPORT? is hidden, and the
+        prompt before it stays the unfinished line on screen.
+        """
+        while True:
+            if self._reprompt and not self._drop_reprompt():
+                return                      # more of the new prompt may come
+            if "\n" not in self._data_buffer:
+                return
+            line, rest = self._data_buffer.split("\n", 1)
+            prompt, proto = self._split_after_prompt(line)
+            self._held_prompt = ""
+            if self._is_transport_reply(proto):
+                self._data_buffer = prompt + rest
+                self._on_transport_reply(proto)
+                if prompt:
+                    # The BBS follows its answer with a fresh prompt
+                    # ("\r\n> "); the one on screen stands for it.
+                    self._held_prompt = prompt
+                    self._reprompt = (prompt, "\n" + prompt)
+                continue
+            self._data_buffer = rest
+            shown, self._partial_shown = self._partial_shown, ""
+            if prompt:
+                self._process_line(prompt, shown)
+                self._process_line(proto)
+            else:
+                self._process_line(line, shown)
+
+    def _split_after_prompt(self, line: str) -> tuple:
+        """(prompt, protocol line) when *line* is a protocol line that came
+        after the bare prompt the BBS was waiting at; else ("", line).
+
+        Only that prompt: a message quoting "> ;AUTH OK" is just text.
+        """
+        held = self._held_prompt
+        if held and line.startswith(held):
+            proto = line[len(held):].lstrip(" ")
+            if _PROTOCOL_LINE.match(proto):
+                return line[:len(line) - len(proto)], proto
+        return "", line
+
+    def _drop_reprompt(self) -> bool:
+        """Drop the line end and prompt that follow a hidden ;TRANSPORT
+        reply, when they repeat the prompt already on screen.
+
+        False while the data so far could still be them.  (During login
+        the BBS sends no new prompt: anything else ends the wait.)
+        """
+        prompt, repeat = self._reprompt
+        after = self._data_buffer[len(prompt):]
+        if after.startswith(repeat):
+            self._data_buffer = prompt + after[len(repeat):]
+        elif repeat.startswith(after):
+            return False
+        self._reprompt = None
+        return True
+
+    def _unfinished_line(self) -> str:
+        """The part of the unfinished line that may be shown: not a
+        protocol line just starting after a prompt, nor a prompt that may
+        be about to be dropped as a repeat."""
+        if self._reprompt:
+            return self._reprompt[0]
+        buf, held = self._data_buffer, self._held_prompt
+        if held and buf.startswith(held) and buf[len(held):].lstrip(" ").startswith(";"):
+            return held
+        return buf
+
     def _show_partial_line(self):
         """Show the unfinished line the BBS has stopped at (a prompt).
 
         The text stays in the buffer: when the rest of the line comes, the
         whole line is processed and only the new part is displayed.
         """
-        buf = self._data_buffer
+        buf = self._unfinished_line()
         if not buf or buf.startswith(";") or buf == self._partial_shown:
             return                          # ;protocol lines stay hidden
         if self.auth.process_line(
@@ -895,11 +1028,6 @@ class MainWindow(QMainWindow):
             self.terminal.display.append_text("\n", "normal")
             self._log_line(line)
             return
-        # Transport auto-detection (suppress from display)
-        if self._handle_transport_response(line):
-            self._log_line(line)
-            return
-
         # Tactical address response (suppress protocol lines from display)
         if self._handle_tactical_response(line):
             self._log_line(line)
@@ -1074,7 +1202,7 @@ class MainWindow(QMainWindow):
         if not connected:
             if self.config.is_hf_band:
                 self.bw_label.setText(f"BW: {self.config.session_bandwidth} Hz")
-            elif self.config.mode == MODE_AGWPE:
+            elif self.config.mode in (MODE_AGWPE, MODE_LOCAL_TEST):
                 self.bw_label.setText("BW: —")
             else:
                 self.bw_label.setText(f"BW: {self.config.get('fm_bandwidth', 'NARROW')}")
@@ -1133,8 +1261,9 @@ class MainWindow(QMainWindow):
                 self.terminal.display.append_warning(
                     "  Aether HF's host port is off by default: in Aether HF,\n"
                     "  Setup step 5, turn on \"Host programs\" (port 8300).")
-        self.modem_status_label.setText("Modem: Error")
-        self.modem_status_label.setStyleSheet(f"color: {C['error']};")
+        if not self.config.is_local_test:        # its label shows the BBS
+            self.modem_status_label.setText("Modem: Error")
+            self.modem_status_label.setStyleSheet(f"color: {C['error']};")
         self._connect_in_progress = False
 
     @pyqtSlot(bool)
@@ -1187,13 +1316,20 @@ class MainWindow(QMainWindow):
         falls back to the global ``my_callsign``/``my_ssid`` in config.
         This never mutates the persisted config.
         """
+        if self.config.is_local_test:
+            call = self.config.get("local_test_callsign", "").upper().strip()
+            if call:
+                return call                 # testing as someone else
         if self._active_profile:
             return self.config.profile_full_callsign(self._active_profile)
         return self.config.full_callsign
 
     def _update_title(self):
         call = self._effective_callsign()
-        if call:
+        if self.config.is_local_test:
+            who = f" as {call}" if call else ""
+            self.setWindowTitle(f"{APP_NAME} — {LOCAL_TEST_TITLE}{who}")
+        elif call:
             self.setWindowTitle(f"{APP_NAME} — {call}")
         else:
             self.setWindowTitle(f"{APP_NAME} — {APP_TAGLINE}")
@@ -1492,6 +1628,7 @@ class MainWindow(QMainWindow):
         self.terminal.display.append_system(f"Switched to {label}")
         QTimer.singleShot(300, self._launch_modem_processes)
 
+        self._sync_local_test()
         self._sync_aether_monitor()
         self._update_ui_state()
         return True
@@ -1502,6 +1639,8 @@ class MainWindow(QMainWindow):
             return          # already started (a mode switch beat the startup launch)
         mode = self.config.mode
 
+        if mode == MODE_LOCAL_TEST:
+            return          # no modem program: Aether Term is the modem
         if mode == MODE_AETHER_HF:
             if not self.config.get("aether_auto_launch", False):
                 return
@@ -1632,8 +1771,11 @@ class MainWindow(QMainWindow):
             new_mode = self.config.get("vara_mode", "VARA FM")
             if new_mode != old_mode:
                 self._terminate_modem_processes()
-                self.terminal.display.append_system(f"Switched to {new_mode}")
+                self.terminal.display.append_system(
+                    f"Switched to {_MODE_LABEL.get(new_mode, new_mode)}")
                 QTimer.singleShot(300, self._launch_modem_processes)
+            self._sync_local_test()
+            self._update_title()
 
             self._sync_aether_monitor(restart=True)
             self._update_ui_state()
@@ -1665,6 +1807,8 @@ class MainWindow(QMainWindow):
 
     def _auto_launch_on(self) -> bool:
         """Whether Aether Term starts the current mode's modem program."""
+        if self.config.is_local_test:
+            return False
         key, default = {
             MODE_AETHER_HF: ("aether_auto_launch", False),
             MODE_AGWPE: ("soundmodem_auto_launch", False),
@@ -1894,6 +2038,69 @@ class MainWindow(QMainWindow):
         self.modem = VARAModem()
         self._connect_signals()
 
+    # ── Local test mode ──────────────────────────────────────────────
+
+    def _sync_local_test(self):
+        """In local test mode, listen for the BBS (on the ports set now);
+        out of it, stop listening."""
+        from vara.local_test import LocalTestModem
+        local = isinstance(self.modem, LocalTestModem)
+        if not self.config.is_local_test:
+            if local:
+                if self.modem.state != ConnectionState.DISCONNECTED:
+                    self.modem.disconnect_from_modem()
+                self._swap_modem_vara()
+                self.modem_status_label.setText("Modem: Not connected")
+                self.modem_status_label.setStyleSheet("")
+                self.modem_status_label.setToolTip("")
+            self._update_title()
+            return
+        ports = (int(self.config.get("local_test_cmd_port", 8500)),
+                 int(self.config.get("local_test_data_port", 8501)))
+        if local and self.modem.is_listening and (
+                ports == (self.modem.cmd_port, self.modem.data_port)
+                or self.modem.state != ConnectionState.DISCONNECTED):
+            return                  # (new ports take effect after this call)
+        if not local:
+            self._retire_modem()
+            self.modem = LocalTestModem()
+            self._connect_signals()
+        self._update_title()
+        try:
+            self.modem.listen(*ports)
+        except OSError as e:
+            msg = (f"Local test: can't listen on 127.0.0.1 ports "
+                   f"{ports[0]}/{ports[1]} ({e}).\n"
+                   "  Another program may be using them: choose others in\n"
+                   "  Settings → Modem Configuration → Local test.")
+            self.terminal.display.append_error(msg)
+            self.modem_status_label.setText("Local test: ports in use")
+            self.modem_status_label.setStyleSheet(f"color: {C['error']};")
+            return
+        self.terminal.display.append_warning(
+            "[LOCAL TEST] No radio: nothing is transmitted.\n"
+            f"  Waiting for the BBS on 127.0.0.1 ports "
+            f"{self.modem.cmd_port}/{self.modem.data_port}.\n"
+            "  How to set the BBS up: Settings → Modem Configuration → Local test.")
+
+    @pyqtSlot(bool, str)
+    def _on_bbs_status(self, attached: bool, text: str):
+        """Local test: the BBS attached to our ports, or went."""
+        if not self.config.is_local_test:
+            return
+        self.modem_status_label.setText(text)
+        self.modem_status_label.setStyleSheet(
+            f"color: {C['warning']}; font-weight: bold;")
+        self.modem_status_label.setToolTip(
+            "Local test mode: Aether Term plays VARA FM for a BBS on this PC.\n"
+            "Nothing goes out on the air.")
+        # (once the BBS has named itself: it sends MYCALL first thing)
+        if attached and getattr(self.modem, "bbs_call", "") and text != self._bbs_shown:
+            self.terminal.display.append_system(text)
+        elif not attached and "detached" in text:
+            self.terminal.display.append_warning(text)
+        self._bbs_shown = text
+
     def _retire_modem(self):
         """Close the modem being replaced, without its signals reaching us.
 
@@ -1903,7 +2110,7 @@ class MainWindow(QMainWindow):
         Connect did exactly that).
         """
         old = self.modem
-        for name in _MODEM_SIGNALS:
+        for name in _MODEM_SIGNALS + ("bbs_status",):
             sig = getattr(old, name, None)
             if sig is not None:
                 try:
@@ -1911,20 +2118,35 @@ class MainWindow(QMainWindow):
                 except TypeError:
                     pass                    # nothing connected
         old.disconnect_from_modem()
+        if hasattr(old, "shutdown"):
+            old.shutdown()                  # local test: stop listening
 
     # ── Transport detection ──────────────────────────────────────────
 
     def _query_transport(self):
         """Send ;TRANSPORT? to detect the BBS transport type."""
+        if self.modem.state != ConnectionState.CONNECTED:
+            return
         self.modem.send_data(";TRANSPORT?\r\n")
+        self._transport_reply_until = time.monotonic() + TRANSPORT_REPLY_WINDOW_S
 
-    def _handle_transport_response(self, line: str) -> bool:
-        """Check if a line is a ;TRANSPORT response.  Returns True if handled."""
-        if line.startswith(";TRANSPORT "):
-            self.terminal.display.append_system(
-                f"BBS transport: {line[11:].strip()}")
-            return True
-        return False
+    def _is_transport_reply(self, line: str) -> bool:
+        """Whether *line* answers our ;TRANSPORT? (the first ;TRANSPORT
+        line soon after it).  Any other ;TRANSPORT line is shown."""
+        if not line.startswith(";TRANSPORT ") or not self._transport_reply_until:
+            return False
+        if time.monotonic() > self._transport_reply_until:
+            self._transport_reply_until = 0.0
+            return False
+        return True
+
+    def _on_transport_reply(self, line: str):
+        """The BBS answered ;TRANSPORT?: show its link type in the status bar."""
+        self._transport_reply_until = 0.0
+        label = line[len(";TRANSPORT "):].strip()
+        log.info(f"BBS transport: {label}")
+        self.transport_label.setText(f"BBS link: {label}")
+        self._log_line(line)
 
     # ── Tactical address ──────────────────────────────────────────────
 
@@ -2142,6 +2364,8 @@ class MainWindow(QMainWindow):
             self.ptt.stop()
         if self.modem.state != ConnectionState.DISCONNECTED:
             self.modem.disconnect_from_modem()
+        if hasattr(self.modem, "shutdown"):
+            self.modem.shutdown()           # local test: stop listening
         self._close_session_log()
         self._terminate_modem_processes()
         self.config.save()

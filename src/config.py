@@ -27,6 +27,7 @@ MODE_VARA_FM = "VARA FM"
 MODE_VARA_HF = "VARA HF"
 MODE_AETHER_HF = "Aether HF"
 MODE_AGWPE = "AGWPE"
+MODE_LOCAL_TEST = "Local test"   # play VARA FM for a BBS on this PC, no radio
 
 # HF PTT methods (the ``hf_ptt_method`` setting), as shown in Settings
 PTT_VOX = "None (VOX)"
@@ -118,7 +119,8 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "my_callsign": "",
     "my_ssid": 0,
 
-    # Transport mode: "VARA FM", "VARA HF", "Aether HF" or "AGWPE"
+    # Transport mode: "VARA FM", "VARA HF", "Aether HF", "AGWPE" or
+    # "Local test"
     "vara_mode": "VARA FM",
 
     # VARA FM modem
@@ -160,6 +162,12 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "soundmodem_port": 8000,
     "soundmodem_auto_launch": False,
     "soundmodem_exe_path": "",
+
+    # Local test (no radio): Aether Term listens on 127.0.0.1 as a VARA FM
+    # modem for a BBS instance on this PC.  Not 8300/8301: VARA uses those.
+    "local_test_cmd_port": 8500,
+    "local_test_data_port": 8501,
+    "local_test_callsign": "",      # who to connect as; "" = my callsign
 
     # PTT (HF only — FM handles PTT internally)
     "hf_ptt_method": "OmniRig",  # one of PTT_METHODS
@@ -326,6 +334,10 @@ class Config:
     @property
     def is_aether(self) -> bool:
         return self.mode == MODE_AETHER_HF
+
+    @property
+    def is_local_test(self) -> bool:
+        return self.mode == MODE_LOCAL_TEST
 
     @property
     def is_hf_band(self) -> bool:

@@ -37,3 +37,35 @@ jobs:
 
       - name: Run tests
         run: python -m pytest
+
+  # Local test mode against the real Aether BBS: its VARA FM instance
+  # attaches to Aether Term's listener and runs a full session
+  bbs-interop:
+    runs-on: ubuntu-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+      AETHER_BBS_DIR: ${{ github.workspace }}/aether-bbs
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: KK4ODA/aether-bbs
+          path: aether-bbs
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Qt runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt pydantic tomli-w
+
+      - name: Run the BBS interop tests
+        run: python -m pytest tests/test_local_test_bbs.py -v
