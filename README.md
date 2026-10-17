@@ -39,6 +39,8 @@ Aether Term is a PyQt6 desktop application for connecting to amateur radio BBS s
 A one-line installer for Windows (clones the repository, installs dependencies, creates a
 desktop shortcut) is on the [project page](https://kk4oda.github.io/aether-term/).
 
+The full user manual is in [`docs/MANUAL.md`](docs/MANUAL.md).
+
 ## Local test (no radio)
 
 Test your Aether BBS from Aether Term on the same PC, with no radio or modem. The BBS reaches
