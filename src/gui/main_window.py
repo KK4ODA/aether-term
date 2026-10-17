@@ -74,6 +74,8 @@ TRANSPORT_REPLY_WINDOW_S = 20.0
 # "> " with no line end, then ";TRANSPORT VARA_FM" or ";AUTH OK" arrives
 # on what is, here, the same line.
 _PROTOCOL_LINE = re.compile(r";(?:AUTH|TRANSPORT|TACTICAL|WLREG)\b")
+# A bare prompt with a protocol line straight after it, in one read
+_BARE_PROMPT_THEN_PROTOCOL = re.compile(r"^(>\s?)(;.*)$")
 
 # Connecting from a profile that switched modes: time for the modem program
 # just launched to open its ports.
@@ -844,9 +846,11 @@ class MainWindow(QMainWindow):
             self.terminal.display.append_warning(
                 "Not connected — command not sent.")
             return
-        self.terminal.display.append_text(f"> {text}\n", "dim")
+        # A password typed at the BBS's login prompt is not shown or logged
+        shown = "********" if self.auth.awaiting_result else text
+        self.terminal.display.append_text(f"> {shown}\n", "dim")
         self.modem.send_data(text + self._line_end())
-        self._log_line(f"> {text}")
+        self._log_line(f"> {shown}")
 
     def _line_end(self) -> str:
         """Line end for what the user types: the BBS's own convention.
@@ -963,13 +967,27 @@ class MainWindow(QMainWindow):
         after the bare prompt the BBS was waiting at; else ("", line).
 
         Only that prompt: a message quoting "> ;AUTH OK" is just text.
+        Prompt and reply can also come in one read (no radio in between:
+        local test mode), so a bare "> " followed by the line we are
+        waiting for — the answer to ;TRANSPORT?, or the login result —
+        is split too.
         """
         held = self._held_prompt
         if held and line.startswith(held):
             proto = line[len(held):].lstrip(" ")
             if _PROTOCOL_LINE.match(proto):
                 return line[:len(line) - len(proto)], proto
+        m = _BARE_PROMPT_THEN_PROTOCOL.match(line)
+        if m and self._expected_protocol_line(m.group(2)):
+            return m.group(1), m.group(2)
         return "", line
+
+    def _expected_protocol_line(self, proto: str) -> bool:
+        """Whether *proto* is (the start of) a protocol line we are waiting for."""
+        def is_or_starts(word):
+            return proto.startswith(word) or word.startswith(proto)
+        return ((is_or_starts(";TRANSPORT") and self._transport_reply_until > 0)
+                or (is_or_starts(";AUTH") and self.auth.awaiting_result))
 
     def _drop_reprompt(self) -> bool:
         """Drop the line end and prompt that follow a hidden ;TRANSPORT
@@ -996,6 +1014,9 @@ class MainWindow(QMainWindow):
         buf, held = self._data_buffer, self._held_prompt
         if held and buf.startswith(held) and buf[len(held):].lstrip(" ").startswith(";"):
             return held
+        m = _BARE_PROMPT_THEN_PROTOCOL.match(buf)
+        if m and self._expected_protocol_line(m.group(2)):
+            return m.group(1)
         return buf
 
     def _show_partial_line(self):
@@ -1073,6 +1094,12 @@ class MainWindow(QMainWindow):
                 self.terminal.display.append_error(action.display_text)
             elif action.is_warning:
                 self.terminal.display.append_warning(action.display_text)
+                if action.is_auth_event and password is None:
+                    op = self._effective_callsign()
+                    self.terminal.display.append_system(
+                        f"  (No password saved for station {target} with operator "
+                        f"{op} or blank. Add one in Settings → Security / "
+                        "Passwords to log in automatically.)")
             else:
                 self.terminal.display.append_system(action.display_text)
         elif shown:

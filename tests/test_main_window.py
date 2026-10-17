@@ -331,6 +331,47 @@ def test_transport_reply_while_the_password_prompt_is_up(qapp, win):
     assert win.transport_label.text() == "BBS link: VARA_FM"
 
 
+def test_transport_reply_in_the_same_read_as_the_password_prompt(qapp, win):
+    """Local test mode has no radio in between: the BBS's "> " and its
+    answer to ;TRANSPORT? came in one read, and showed as
+    "> ;TRANSPORT VARA_FM".  No password saved here, so the prompt shows."""
+    win._target = "KK4ODA-7"
+    _expect_transport_reply(win)
+    win._on_data_received(";AUTH HMAC-SHA256 " + "01" * 16 + "\r\n"
+                          "Enter password (or HMAC client will respond automatically):\r\n"
+                          "> ;TRANSPORT VARA_FM\r\n")
+    shown = text(win)
+    assert ";TRANSPORT" not in shown
+    assert shown.endswith("automatically):\n> ")
+    assert "No password saved for station KK4ODA-7 with operator KK4ODA" in shown
+    assert win.transport_label.text() == "BBS link: VARA_FM"
+
+
+def test_login_result_in_the_same_read_as_the_hidden_prompt(qapp, win):
+    win._target = "W1AW-5"
+    win.passwords.set_password("W1AW-5", "secret", operator=win._effective_callsign())
+    _expect_transport_reply(win)
+    win._on_data_received(";AUTH HMAC-SHA256 " + "ab" * 16 + "\r\n"
+                          "Enter password (or HMAC client will respond automatically):\r\n"
+                          "> ;TRANSPORT VARA_FM\r\n")
+    win._on_data_received(";AUTH OK\r\nWelcome\r\n> ")    # (the BBS sends no new prompt)
+    shown = text(win)
+    assert "Authentication successful" in shown
+    assert ";AUTH" not in shown and ";TRANSPORT" not in shown and "Enter password" not in shown
+    assert shown.endswith("Welcome\n> ")
+
+
+def test_password_typed_at_the_login_prompt_is_masked(qapp, win):
+    win.auth.process_line(";AUTH HMAC-SHA256 " + "01" * 16, None)   # nothing saved
+    from vara.connection import ConnectionState
+    win.modem._state = ConnectionState.CONNECTED
+    sent = []
+    win.modem.send_data = sent.append
+    win._send_text("hunter2")
+    assert sent == ["hunter2\r"]
+    assert "hunter2" not in text(win) and "> ********" in text(win)
+
+
 def test_quoted_protocol_line_in_a_message_is_just_text(qapp, win):
     win._on_data_received("> ")
     win._on_data_received("\r\nMsg 12 from W1XYZ:\r\n> ;AUTH OK\r\n> ;TRANSPORT VARA_FM\r\n")
