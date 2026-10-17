@@ -5,6 +5,23 @@ Format: [version] — YYYY-MM-DD, then a bulleted list of changes.
 
 ---
 
+## [1.1.10] — 2026-10-17
+
+### Fixed
+
+- **`> ;TRANSPORT VARA_FM` no longer shows at the login prompt in local
+  test mode.** With no radio in between, the BBS's `> ` and its answer to
+  `;TRANSPORT?` arrived together and slipped past the filter. The same
+  applies to `;AUTH OK` arriving on the prompt's line.
+- **"No saved password" says what it looked for:** the station and the
+  operator callsign, so a mismatch with Settings → Security / Passwords is
+  easy to see.
+- **A password typed by hand at the BBS's login prompt is masked.** It was
+  echoed on screen and in the session log in clear; it shows as
+  `********` now.
+
+---
+
 ## [1.1.9] — 2026-10-16
 
 ### Added
