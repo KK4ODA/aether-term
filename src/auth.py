@@ -87,6 +87,11 @@ class AuthInterceptor:
     def reset(self):
         self._state = AuthState.IDLE
 
+    @property
+    def awaiting_result(self) -> bool:
+        """A challenge came and ;AUTH OK / FAIL has not yet."""
+        return self._state == AuthState.AWAITING_RESULT
+
     def process_line(self, line: str, password: Optional[str],
                      auto_respond: bool = True,
                      show_protocol: bool = False
