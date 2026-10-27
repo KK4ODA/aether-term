@@ -62,6 +62,17 @@ hiddenimports = [
     'vara.local_test',
     'vara.agwpe',
     'vara.agwpe_modem',
+    'vara.kiss_modem',
+    'ax25',
+    'ax25.frame',
+    'ax25.kiss',
+    'ax25.link',
+    'tnc',
+    'tnc.transports',
+    'tnc.ble',
+    'gui.kiss_settings',
+    'serial',
+    'serial.tools.list_ports',
     'aether',
     'aether.control',
 
@@ -95,6 +106,15 @@ hiddenimports = [
     'xmlrpc',
     'xmlrpc.client',
 ]
+
+# ── Bluetooth LE (bleak) loads its OS backend dynamically ────────
+try:
+    from PyInstaller.utils.hooks import collect_submodules
+    hiddenimports += collect_submodules('bleak')
+    if sys.platform == 'win32':
+        hiddenimports += collect_submodules('winrt')
+except Exception as e:  # bleak not installed: BLE is unavailable in this build
+    print(f"WARNING: bleak not bundled ({e})")
 
 # ── Optional: pywin32 for OmniRig (Windows only) ────────────────
 if sys.platform == 'win32':

@@ -236,14 +236,26 @@ if errorlevel 1 (
     set MISSING=1
 )
 
+!PY! -c "import serial" >nul 2>&1
+if errorlevel 1 (
+    echo  [MISSING] pyserial
+    set MISSING=1
+)
+
+!PY! -c "import bleak" >nul 2>&1
+if errorlevel 1 (
+    echo  [MISSING] bleak
+    set MISSING=1
+)
+
 if !MISSING!==1 (
     echo.
     echo  Installing required packages...
-    !PY! -m pip install PyQt6 cryptography certifi
+    !PY! -m pip install PyQt6 cryptography certifi pyserial bleak
     if errorlevel 1 (
         echo.
         echo  [ERROR] pip install failed. Please run manually:
-        echo    !PY! -m pip install PyQt6 cryptography certifi
+        echo    !PY! -m pip install PyQt6 cryptography certifi pyserial bleak
         pause
         exit /b 1
     )

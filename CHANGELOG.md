@@ -5,6 +5,22 @@ Format: [version] — YYYY-MM-DD, then a bulleted list of changes.
 
 ---
 
+## [1.2.0] — 2026-10-27
+
+### Added
+
+- **KISS TNC mode: connect straight to a radio's built-in TNC**, like
+  EasyTerm or VARA Terminal. Choose *KISS TNC* in the toolbar. The TNC can
+  be on a COM port (a Kenwood TH-D74/D75 paired over Bluetooth, or USB),
+  on Bluetooth LE (VR-N76, VR-N7600, Mobilinkd and similar; press *Scan*),
+  or on TCP (Direwolf, port 8001). Aether Term runs the AX.25 connection
+  itself (calls, acknowledgements, retries, digipeater paths) and can set
+  the TNC's TXDELAY, persistence and slot time. Settings are in
+  *Settings → Modem Configuration → KISS TNC*; profiles can use the mode.
+  Bluetooth LE has been tested only against a simulated radio so far.
+
+---
+
 ## [1.1.11] — 2026-10-27
 
 ### Fixed

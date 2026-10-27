@@ -14,6 +14,10 @@ password the user is approved and has that password, so the BBS logs
 them in with its HMAC challenge.  Prints "STATE <name> WRONG=<n>" when
 the instance's modem state settles, then serves until stdin closes.
 BBS log lines go to stderr.
+
+With <data_port> 0 the instance is a Soundmodem one instead, on the
+AGWPE port <cmd_port> (Direwolf, for the KISS TNC tests); its station is
+the BBS callsign, N0BBS-10.
 """
 
 import logging
@@ -40,9 +44,19 @@ cfg = AppConfig()
 cfg.station.bbs_callsign = "N0BBS-10"
 cfg.station.sysop_callsign = "N0SYS"
 cfg.bbs.message_dir = str(work / "messages")
-cfg.instances = [InstanceConfig(
-    name="Local test", transport="VARA_FM", host="127.0.0.1",
-    cmd_port=cmd_port, data_port=data_port, auto_start=False)]
+if data_port:
+    cfg.instances = [InstanceConfig(
+        name="Local test", transport="VARA_FM", host="127.0.0.1",
+        cmd_port=cmd_port, data_port=data_port, auto_start=False)]
+    ready = "LISTENING"
+else:
+    inst = InstanceConfig(name="Local test", transport="SOUNDMODEM",
+                          cmd_port=cmd_port, data_port=cmd_port + 1, auto_start=False)
+    inst.soundmodem.protocol = "AGWPE"
+    inst.soundmodem.host = "127.0.0.1"
+    inst.soundmodem.port = cmd_port
+    cfg.instances = [inst]
+    ready = "IDLE"
 
 bus = EventBus()
 store = MessageStore(cfg, event_bus=bus)
@@ -59,9 +73,9 @@ dispatcher.start()
 
 mux = im.all_muxes()["Local test"]
 deadline = time.time() + 30
-while time.time() < deadline and mux.state.name != "LISTENING":
+while time.time() < deadline and mux.state.name != ready:
     time.sleep(0.1)
-wrong = mux._interface._init_wrong_count
+wrong = getattr(getattr(mux, "_interface", None), "_init_wrong_count", 0)
 print(f"STATE {mux.state.name} WRONG={wrong}", flush=True)
 
 sys.stdin.read()          # until the test is done
