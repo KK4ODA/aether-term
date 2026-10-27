@@ -64,6 +64,15 @@ def test_never_more_than_maxframe_unacknowledged(air):
     assert theirs.wait(lambda: len(theirs.data) == FAST.paclen * 10)
 
 
+def test_poll_answer_that_acks_the_window_sends_the_rest(air):
+    """Only the answers to polls get through: each one acknowledges the
+    whole window, and the queued text must go out after it."""
+    me, my, bbs, theirs = _connect(air)
+    air.drop = lambda f: str(f.src) == "KK4ODA-7" and not f.pf
+    me.send(b"y" * FAST.paclen * 10)
+    assert theirs.wait(lambda: len(theirs.data) == FAST.paclen * 10)
+
+
 def test_lost_i_frame_is_recovered_by_reject(air):
     me, my, bbs, theirs = _connect(air)
     dropped = []

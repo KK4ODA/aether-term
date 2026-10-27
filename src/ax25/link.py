@@ -429,6 +429,7 @@ class DataLink:
                     self._start_timer("t3", self.params.t3)
                 else:
                     self._start_timer("t1", self._t1())
+                self._push()                        # queued text waiting on the window
             return
         moved = self._ack_through(f.nr)
         if f.type is FrameType.REJ and self._va != self._vs:
