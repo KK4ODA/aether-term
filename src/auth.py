@@ -119,11 +119,13 @@ class AuthInterceptor:
                     is_auth_event=True,
                 )
             else:
-                # No password — show challenge, let user type manually
+                # No password, or automatic login off — the user answers
                 self._state = AuthState.AWAITING_RESULT
+                why = ("Automatic login is off (Settings → Security)" if password
+                       else "No saved password")
                 return AuthAction(
                     suppress=False,
-                    display_text=f"[AUTH] No saved password — manual auth required\n{line}",
+                    display_text=f"[AUTH] {why} — manual auth required\n{line}",
                     is_auth_event=True,
                     is_warning=True,
                 )
@@ -132,7 +134,7 @@ class AuthInterceptor:
         if self._state == AuthState.AWAITING_RESULT:
             if "Enter password" in stripped or stripped == "> " or stripped == ">":
                 return AuthAction(
-                    suppress=not show_protocol and password is not None,
+                    suppress=not show_protocol and password is not None and auto_respond,
                     is_auth_event=True,
                 )
 

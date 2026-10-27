@@ -29,6 +29,7 @@ def flrig():
 def _cfg(home, **values):
     from config import Config
     cfg = Config()
+    values.setdefault("hamlib_rig_model", 3073)    # a real rig, not the Dummy
     for k, v in values.items():
         cfg.set(k, v)
     return cfg
@@ -48,6 +49,16 @@ def test_hamlib_ptt_keys_rigctld(qapp, home, rigctld):
     c.on_ptt_event(True)
     c.stop()                                    # releases the radio on the way out
     assert not rigctld.keyed and not c.is_enabled
+
+
+def test_hamlib_dummy_rig_is_refused(qapp, home, rigctld):
+    """The Dummy rig (the default model) answers but keys no radio."""
+    from vara.ptt import PTTController
+    cfg = _cfg(home, hamlib_rigctld_port=rigctld.port, hamlib_auto_launch=False,
+               hamlib_rig_model=1)
+    c = PTTController()
+    assert not c.start_method("Hamlib (rigctld)", cfg)
+    assert "Dummy rig" in c.last_error and "Rig Model" in c.last_error
 
 
 def test_flrig_ptt_keys_flrig(qapp, home, flrig):
