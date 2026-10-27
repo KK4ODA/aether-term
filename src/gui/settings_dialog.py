@@ -11,12 +11,13 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QWidget,
     QFormLayout, QLineEdit, QSpinBox, QComboBox, QCheckBox,
     QPushButton, QLabel, QGroupBox, QFileDialog, QRadioButton,
-    QButtonGroup, QDialogButtonBox, QScrollArea, QFrame,
+    QButtonGroup, QDialogButtonBox, QScrollArea, QFrame, QGridLayout,
 )
 
-from config import (MODE_LOCAL_TEST, PTT_FLRIG, PTT_HAMLIB, PTT_METHODS,
+from config import (MODE_KISS, MODE_LOCAL_TEST, PTT_FLRIG, PTT_HAMLIB, PTT_METHODS,
                     PTT_OMNIRIG, PTT_VOX)
 from gui.hamlib_settings import HamlibSettingsGroup
+from gui.kiss_settings import KissSettingsGroup
 from gui.theme import hint_style, info_style, settings_scroll_style
 
 log = logging.getLogger(__name__)
@@ -96,7 +97,7 @@ class SettingsDialog(QDialog):
 
         # Mode group
         mode_group = QGroupBox("Modem")
-        mode_layout = QHBoxLayout(mode_group)
+        mode_layout = QGridLayout(mode_group)
         self.mode_group = QButtonGroup(self)
         self.fm_radio = QRadioButton("VARA FM")
         self.fm_radio.setToolTip("VHF/UHF via VARA FM modem.")
@@ -117,12 +118,17 @@ class SettingsDialog(QDialog):
             "Talk to a BBS on this PC with no radio or modem: Aether Term\n"
             "plays VARA FM for it. See Modem Configuration → Local test.")
         self.mode_group.addButton(self.agwpe_radio)
+        self.kiss_radio = QRadioButton("KISS TNC")
+        self.kiss_radio.setToolTip(
+            "A radio's built-in KISS TNC (Kenwood TH-D74/D75 over Bluetooth\n"
+            "or USB, Bluetooth LE radios) or any KISS TNC, with no other\n"
+            "program. See Modem Configuration → KISS TNC.")
         self.mode_group.addButton(self.local_test_radio)
-        mode_layout.addWidget(self.fm_radio)
-        mode_layout.addWidget(self.hf_radio)
-        mode_layout.addWidget(self.aether_radio)
-        mode_layout.addWidget(self.agwpe_radio)
-        mode_layout.addWidget(self.local_test_radio)
+        self.mode_group.addButton(self.kiss_radio)
+        for i, radio in enumerate((self.fm_radio, self.hf_radio, self.aether_radio,
+                                   self.agwpe_radio, self.kiss_radio,
+                                   self.local_test_radio)):
+            mode_layout.addWidget(radio, i // 3, i % 3)
         layout.addWidget(mode_group)
 
         # HF Settings — only visible when HF mode selected
@@ -223,6 +229,8 @@ class SettingsDialog(QDialog):
         self.agwpe_radio.toggled.connect(self._update_modem_groups)
         self.local_test_radio.toggled.connect(self._update_bw_groups)
         self.local_test_radio.toggled.connect(self._update_modem_groups)
+        self.kiss_radio.toggled.connect(self._update_bw_groups)
+        self.kiss_radio.toggled.connect(self._update_modem_groups)
 
         return self._make_scrollable(w)
 
@@ -484,6 +492,10 @@ class SettingsDialog(QDialog):
         lt_form.addRow(lt_help)
         layout.addWidget(self.local_test_group)
 
+        # KISS TNC
+        self.kiss_group = KissSettingsGroup(self.config, self)
+        layout.addWidget(self.kiss_group)
+
         layout.addStretch()
 
         # Connect mode radio buttons (from Terminal Setup tab) to toggle groups
@@ -611,6 +623,7 @@ class SettingsDialog(QDialog):
         self.ptt_group.setEnabled(is_hf or is_aether)
         self.agwpe_group.setEnabled(is_agwpe)
         self.local_test_group.setEnabled(self.local_test_radio.isChecked())
+        self.kiss_group.setEnabled(self.kiss_radio.isChecked())
 
         # Auto-launch checkboxes should always be editable
         self.fm_auto_launch.setEnabled(True)
@@ -641,6 +654,8 @@ class SettingsDialog(QDialog):
             self.agwpe_radio.setChecked(True)
         elif mode == MODE_LOCAL_TEST:
             self.local_test_radio.setChecked(True)
+        elif mode == MODE_KISS:
+            self.kiss_radio.setChecked(True)
         else:
             self.fm_radio.setChecked(True)
 
@@ -706,6 +721,7 @@ class SettingsDialog(QDialog):
         self.local_test_call.setText(c.get("local_test_callsign", ""))
         self.local_test_call.setPlaceholderText(
             c.full_callsign or "your callsign")
+        self.kiss_group.load_values()
 
         # Auth tab
         self.auto_hmac_cb.setChecked(c.get("auto_respond_hmac", True))
@@ -730,6 +746,8 @@ class SettingsDialog(QDialog):
             c.set("vara_mode", "AGWPE")
         elif self.local_test_radio.isChecked():
             c.set("vara_mode", MODE_LOCAL_TEST)
+        elif self.kiss_radio.isChecked():
+            c.set("vara_mode", MODE_KISS)
         elif self.hf_radio.isChecked():
             c.set("vara_mode", "VARA HF")
         elif self.aether_radio.isChecked():
@@ -785,6 +803,7 @@ class SettingsDialog(QDialog):
         c.set("local_test_cmd_port", lt_cmd)
         c.set("local_test_data_port", lt_data)
         c.set("local_test_callsign", self.local_test_call.text().upper().strip())
+        self.kiss_group.save_values()
 
         c.set("auto_respond_hmac", self.auto_hmac_cb.isChecked())
         c.set("show_auth_protocol", self.show_auth_cb.isChecked())

@@ -4,7 +4,8 @@ BBS terminal client for amateur radio, with HMAC-SHA256 authentication, rig cont
 built-in support for the open-source [Aether HF](https://github.com/KK4ODA/aether-hf) modem.
 
 Aether Term is a PyQt6 desktop application for connecting to amateur radio BBS systems over
-**Aether HF**, **VARA HF**, **VARA FM**, and AGWPE packet TNCs (Soundmodem, Direwolf).
+**Aether HF**, **VARA HF**, **VARA FM**, AGWPE packet TNCs (Soundmodem, Direwolf), and KISS TNCs
+such as the one built into a Kenwood TH-D74/D75, over Bluetooth, USB or TCP.
 
 > **Formerly VARA Term.** The application was renamed when Aether HF support was added. Your
 > settings, saved station passwords and Hamlib download are carried over automatically the
@@ -12,7 +13,10 @@ Aether Term is a PyQt6 desktop application for connecting to amateur radio BBS s
 
 ## Features
 
-- Connect to BBS stations over Aether HF, VARA HF, VARA FM, or AGWPE packet
+- Connect to BBS stations over Aether HF, VARA HF, VARA FM, AGWPE packet, or a KISS TNC
+- **KISS TNC mode**: connect straight to a radio's built-in TNC (TH-D74/D75 over Bluetooth or
+  USB, Bluetooth LE radios such as the VR-N76) or Direwolf, with no Soundmodem in between.
+  Aether Term runs AX.25 itself, digipeaters included. Bluetooth LE is not yet tested with a radio.
 - **Aether HF integration**: live modem status in the status bar, a pre-connect check that
   explains in plain words why the modem would refuse a call (host port off, no rules chosen,
   keying or sound card fault), modem identity check, link speed and session bandwidth
@@ -33,13 +37,25 @@ Aether Term is a PyQt6 desktop application for connecting to amateur radio BBS s
 1. Install dependencies: `pip install -r requirements.txt`
 2. Run: `python src/main.py` (or double-click `start_aether_term.bat`)
 3. Configure your callsign in **Settings → Terminal Setup**
-4. Pick the modem in the toolbar (Aether HF, VARA HF, VARA FM or Soundmodem)
+4. Pick the modem in the toolbar (Aether HF, VARA HF, VARA FM, Soundmodem or KISS TNC)
 5. Enter the target BBS callsign and click **Connect**
 
 A one-line installer for Windows (clones the repository, installs dependencies, creates a
 desktop shortcut) is on the [project page](https://kk4oda.github.io/aether-term/).
 
 The full user manual is in [`docs/MANUAL.md`](docs/MANUAL.md).
+
+## KISS TNC (radio's built-in TNC)
+
+Choose **KISS TNC** in the toolbar and set **Settings → Modem Configuration → KISS TNC**:
+
+- **Kenwood TH-D74 / TH-D75**: pair the radio in Windows Bluetooth settings (or plug in USB),
+  pick the *Standard Serial over Bluetooth link* COM port, and set the radio's TNC to KISS mode.
+- **Bluetooth LE** radios and TNCs (VR-N76, VR-N7600, Mobilinkd): press **Scan** and pick the
+  radio. New and not yet tested with a radio.
+- **Direwolf**: TCP, port 8001.
+
+See section 5.7 of the [manual](docs/MANUAL.md#57-kiss-tnc).
 
 ## Local test (no radio)
 

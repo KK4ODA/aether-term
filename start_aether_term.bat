@@ -152,6 +152,20 @@ if errorlevel 1 (
     set "MISSING_LIST=!MISSING_LIST! certifi"
 )
 
+!PY! -c "import serial" >nul 2>&1
+if errorlevel 1 (
+    echo  [MISSING] pyserial
+    set MISSING=1
+    set "MISSING_LIST=!MISSING_LIST! pyserial"
+)
+
+!PY! -c "import bleak" >nul 2>&1
+if errorlevel 1 (
+    echo  [MISSING] bleak
+    set MISSING=1
+    set "MISSING_LIST=!MISSING_LIST! bleak"
+)
+
 :: -- Optional: keyring -----------------------------------------------------------
 !PY! -c "import keyring" >nul 2>&1
 if errorlevel 1 (
@@ -207,11 +221,11 @@ if !MISSING!==1 (
     if /i "!INSTALL_CHOICE!"=="Y" (
         echo.
         echo  Installing dependencies...
-        !PY! -m pip install PyQt6 cryptography certifi
+        !PY! -m pip install PyQt6 cryptography certifi pyserial bleak
         if errorlevel 1 (
             echo.
             echo  [ERROR] pip install failed. Please run manually:
-            echo    !PY! -m pip install PyQt6 cryptography certifi
+            echo    !PY! -m pip install PyQt6 cryptography certifi pyserial bleak
             pause
             exit /b 1
         )

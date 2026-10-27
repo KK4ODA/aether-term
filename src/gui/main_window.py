@@ -26,6 +26,7 @@ from PyQt6.QtCore import Qt, QRect, QTimer, QUrl, pyqtSlot
 
 from config import (Config, APP_NAME, APP_VERSION, MODE_VARA_FM,
                     MODE_VARA_HF, MODE_AETHER_HF, MODE_AGWPE, MODE_LOCAL_TEST,
+                    MODE_KISS,
                     PTT_OMNIRIG, PTT_VOX)
 from aether.control import (AetherMonitor, AetherQuery, AetherStatus,
                             find_aether_exe, AETHER_RELEASES_URL,
@@ -89,6 +90,7 @@ _MODES = [
     ("VARA HF", MODE_VARA_HF),
     ("Aether HF", MODE_AETHER_HF),
     ("Soundmodem", MODE_AGWPE),
+    ("KISS TNC", MODE_KISS),
     ("Local test", MODE_LOCAL_TEST),
 ]
 _MODE_INDEX = {value: i for i, (_, value) in enumerate(_MODES)}
@@ -516,6 +518,10 @@ class MainWindow(QMainWindow):
         if hasattr(self.modem, "bbs_status"):
             self.modem.bbs_status.connect(
                 self._on_bbs_status, Qt.ConnectionType.QueuedConnection)
+        # KISS TNC: the link to the radio's TNC
+        if hasattr(self.modem, "tnc_status"):
+            self.modem.tnc_status.connect(
+                self._on_tnc_status, Qt.ConnectionType.QueuedConnection)
         # HF PTT: modem emits ptt_event → PTT controller keys/unkeys radio
         self.modem.ptt_event.connect(self.ptt.on_ptt_event,
                                       Qt.ConnectionType.QueuedConnection)
@@ -598,10 +604,11 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Digipeater Path", str(e))
             self.via1_input.setFocus()
             return False
-        if digis and self.config.mode not in (MODE_VARA_FM, MODE_AGWPE):
+        if digis and self.config.mode not in (MODE_VARA_FM, MODE_AGWPE, MODE_KISS):
             QMessageBox.warning(
                 self, "Digipeater Path",
-                "Digipeaters are supported with VARA FM and Soundmodem.\n\n"
+                "Digipeaters are supported with VARA FM, Soundmodem and a "
+                "KISS TNC.\n\n"
                 f"Set Via 1 / Via 2 to None to call direct with "
                 f"{_MODE_LABEL.get(self.config.mode, self.config.mode)}, "
                 "or switch modes.")
@@ -649,6 +656,11 @@ class MainWindow(QMainWindow):
             self.terminal.display.append_system(
                 "Local test: no radio — the BBS on this PC "
                 f"({self.modem.cmd_port}/{self.modem.data_port})")
+            self.modem.connect_to_modem()
+        elif self.config.is_kiss:
+            self._swap_modem_kiss()
+            self.terminal.display.append_system(
+                f"KISS TNC: {self.modem.transport.describe()}")
             self.modem.connect_to_modem()
         elif is_agwpe:
             # Switch to AGWPE modem
@@ -698,7 +710,8 @@ class MainWindow(QMainWindow):
     @pyqtSlot()
     def _on_modem_connected(self):
         """TCP link to modem is up — now initialize it."""
-        if not self.config.is_local_test:        # its label shows the BBS
+        # (local test's label shows the BBS, a KISS TNC's shows the TNC)
+        if not (self.config.is_local_test or self.config.is_kiss):
             self.terminal.display.append_system("TCP connection to modem established")
             self.modem_status_label.setText("Modem: Connected")
             self.modem_status_label.setStyleSheet(f"color: {C['success']};")
@@ -1229,7 +1242,7 @@ class MainWindow(QMainWindow):
         if not connected:
             if self.config.is_hf_band:
                 self.bw_label.setText(f"BW: {self.config.session_bandwidth} Hz")
-            elif self.config.mode in (MODE_AGWPE, MODE_LOCAL_TEST):
+            elif self.config.mode in (MODE_AGWPE, MODE_LOCAL_TEST, MODE_KISS):
                 self.bw_label.setText("BW: —")
             else:
                 self.bw_label.setText(f"BW: {self.config.get('fm_bandwidth', 'NARROW')}")
@@ -1396,6 +1409,8 @@ class MainWindow(QMainWindow):
                 parts.append(f"Aether HF/{bw}")
             elif mode == MODE_AGWPE:
                 parts.append("Soundmodem")
+            elif mode == MODE_KISS:
+                parts.append("KISS TNC")
             else:
                 fm_bw = p.get("fm_bandwidth", "WIDE")
                 parts.append(f"VARA FM/{fm_bw}")
@@ -1666,7 +1681,7 @@ class MainWindow(QMainWindow):
             return          # already started (a mode switch beat the startup launch)
         mode = self.config.mode
 
-        if mode == MODE_LOCAL_TEST:
+        if mode in (MODE_LOCAL_TEST, MODE_KISS):
             return          # no modem program: Aether Term is the modem
         if mode == MODE_AETHER_HF:
             if not self.config.get("aether_auto_launch", False):
@@ -1834,7 +1849,7 @@ class MainWindow(QMainWindow):
 
     def _auto_launch_on(self) -> bool:
         """Whether Aether Term starts the current mode's modem program."""
-        if self.config.is_local_test:
+        if self.config.is_local_test or self.config.is_kiss:
             return False
         key, default = {
             MODE_AETHER_HF: ("aether_auto_launch", False),
@@ -2057,6 +2072,21 @@ class MainWindow(QMainWindow):
         self.modem = AGWPEModem()
         self._connect_signals()
 
+    def _swap_modem_kiss(self):
+        """A fresh KissModem from the current KISS TNC settings."""
+        from vara.kiss_modem import KissModem
+        self._retire_modem()
+        self.modem = KissModem.from_config(self.config)
+        self._connect_signals()
+
+    @pyqtSlot(str)
+    def _on_tnc_status(self, text: str):
+        """KISS TNC: the link to the TNC opened, or closed."""
+        self.modem_status_label.setText(text)
+        ok = not text.endswith("not connected")
+        self.modem_status_label.setStyleSheet(
+            f"color: {C['success'] if ok else C['text_dim']};")
+
     def _swap_modem_vara(self):
         """Replace the current modem with a VARAModem if not already."""
         if isinstance(self.modem, VARAModem):
@@ -2137,7 +2167,7 @@ class MainWindow(QMainWindow):
         Connect did exactly that).
         """
         old = self.modem
-        for name in _MODEM_SIGNALS + ("bbs_status",):
+        for name in _MODEM_SIGNALS + ("bbs_status", "tnc_status"):
             sig = getattr(old, name, None)
             if sig is not None:
                 try:

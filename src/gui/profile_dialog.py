@@ -90,7 +90,8 @@ class ProfileDialog(QDialog):
         self.mode_combo = QComboBox()
         for label, value in (("VARA FM", "VARA FM"), ("VARA HF", "VARA HF"),
                              ("Aether HF", "Aether HF"),
-                             ("Soundmodem (AGWPE)", "AGWPE")):
+                             ("Soundmodem (AGWPE)", "AGWPE"),
+                             ("KISS TNC", "KISS TNC")):
             self.mode_combo.addItem(label, value)
         form.addRow("Mode:", self.mode_combo)
         self.fm_bw_combo = QComboBox()

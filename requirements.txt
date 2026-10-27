@@ -1,5 +1,7 @@
 PyQt6>=6.5
 cryptography>=41.0
 certifi>=2023.0  # SSL certificates for the update check and Hamlib download
+pyserial>=3.5  # KISS TNC over a serial / Bluetooth COM port
+bleak>=0.22  # KISS TNC over Bluetooth Low Energy
 keyring>=24.0  # optional — OS-level credential storage
 pywin32>=306; sys_platform == "win32"   # optional — required for OmniRig HF PTT (Windows only)

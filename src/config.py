@@ -28,6 +28,7 @@ MODE_VARA_HF = "VARA HF"
 MODE_AETHER_HF = "Aether HF"
 MODE_AGWPE = "AGWPE"
 MODE_LOCAL_TEST = "Local test"   # play VARA FM for a BBS on this PC, no radio
+MODE_KISS = "KISS TNC"           # a KISS TNC: Bluetooth / USB radio, BLE, Direwolf
 
 # HF PTT methods (the ``hf_ptt_method`` setting), as shown in Settings
 PTT_VOX = "None (VOX)"
@@ -168,6 +169,27 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "local_test_cmd_port": 8500,
     "local_test_data_port": 8501,
     "local_test_callsign": "",      # who to connect as; "" = my callsign
+
+    # KISS TNC: a radio's built-in TNC (TH-D74/D75 ...) or any KISS TNC.
+    # Aether Term runs the AX.25 connection itself.
+    "kiss_link": "serial",          # serial (USB / Bluetooth COM port) / ble / tcp
+    "kiss_serial_port": "",         # e.g. COM5
+    "kiss_serial_baud": 9600,
+    "kiss_ble_address": "",         # Bluetooth LE device address
+    "kiss_ble_name": "",            # its name, for display
+    "kiss_ble_service": "",         # "" = the standard KISS-over-BLE service
+    "kiss_tcp_host": "127.0.0.1",
+    "kiss_tcp_port": 8001,          # Direwolf's KISS port
+    "kiss_port": 0,                 # TNC port (radio port) number
+    "kiss_send_params": True,       # send TXDELAY / persistence / slot time
+    "kiss_txdelay": 300,            # ms
+    "kiss_persistence": 63,
+    "kiss_slottime": 100,           # ms
+    "kiss_init": "",                # text commands sent first (TNC2-style TNCs)
+    "ax25_paclen": 128,             # bytes per frame
+    "ax25_maxframe": 4,             # frames sent before an acknowledgement
+    "ax25_frack": 7,                # retry timer, seconds (x path length)
+    "ax25_retries": 10,
 
     # PTT (HF only — FM handles PTT internally)
     "hf_ptt_method": "OmniRig",  # one of PTT_METHODS
@@ -334,6 +356,10 @@ class Config:
     @property
     def is_aether(self) -> bool:
         return self.mode == MODE_AETHER_HF
+
+    @property
+    def is_kiss(self) -> bool:
+        return self.mode == MODE_KISS
 
     @property
     def is_local_test(self) -> bool:

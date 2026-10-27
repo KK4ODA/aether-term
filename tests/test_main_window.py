@@ -112,7 +112,7 @@ def test_vara_fm_digipeater_session(qapp, win):
 
 
 @pytest.mark.parametrize("via1,expected", [
-    ("N4XYZ-7", "supported with VARA FM and Soundmodem"),   # Aether HF can't digipeat
+    ("N4XYZ-7", "supported with VARA FM, Soundmodem and a"),   # Aether HF can't digipeat
     ("N4XYZ-99", "not a valid digipeater callsign"),
 ])
 def test_bad_digipeater_path_stops_the_call(qapp, win, monkeypatch, via1, expected):

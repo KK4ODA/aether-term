@@ -30,7 +30,7 @@ BBS answers, and Aether Term shows the session in a scrolling window. It is a Wi
 first (it also runs from source on Linux), written in Python with PyQt6.
 
 Aether Term does not contain a modem. It drives a separate modem program over TCP on the same
-PC (or another PC on your network):
+PC (or another PC on your network), or a KISS TNC such as the one built into a radio:
 
 | Mode (toolbar) | Modem program | Interface | Who keys the radio |
 |---|---|---|---|
@@ -38,6 +38,7 @@ PC (or another PC on your network):
 | **VARA HF** | VARA HF | VARA TCP host interface, ports 8300/8301 | Aether Term (OmniRig, Hamlib, FLrig) or VOX |
 | **Aether HF** | [Aether HF](https://github.com/KK4ODA/aether-hf) | VARA-compatible host port 8300/8301, plus its control API on 8515 | Aether HF itself, or Aether Term when Aether HF is set to "host program" keying |
 | **Soundmodem** | Soundmodem, Direwolf or any AGWPE TNC | AGWPE, port 8000 | The TNC |
+| **KISS TNC** | none: the radio's or TNC's own modem | KISS over a COM port (USB or Bluetooth), Bluetooth LE, or TCP | The radio or TNC |
 | **Local test** | none | Aether Term plays a VARA FM modem on 127.0.0.1, ports 8500/8501 | Nothing is transmitted |
 
 What it adds on top of a plain terminal:
@@ -146,7 +147,7 @@ are kept by all three methods.
    use one, an **SSID** (0 to 15; 0 means no SSID). Click **OK**. Until a callsign is set, the
    welcome text says "No callsign configured", and pressing Connect opens the settings.
 2. **Choose a mode** in the mode dropdown on the second toolbar row (VARA FM, VARA HF, Aether HF,
-   Soundmodem or Local test), or in **Settings → Terminal Setup → Modem**.
+   Soundmodem, KISS TNC or Local test), or in **Settings → Terminal Setup → Modem**.
 3. **Check the modem program path** under **Settings → Modem Configuration...** if you want Aether
    Term to start the modem for you (next section).
 4. **Save the BBS password** under **Settings → Security / Passwords...** if the BBS uses
@@ -166,6 +167,7 @@ processes.
 | VARA HF | Start VARA HF with Aether Term (and close on exit) | On | The path you set (default `C:\VARA HF\VARA HF.exe`), then `C:\VARA\VARA.exe`, `C:\Program Files\VARA\VARA.exe`, `C:\Program Files (x86)\VARA\VARA.exe` |
 | Aether HF | Start Aether HF with Aether Term (and close on exit) | Off | The path you set, else `%LOCALAPPDATA%\Aether HF\aether-hf.exe`. Not started if Aether HF's control API already answers ("Aether HF is already running — not starting another"). |
 | Soundmodem | Auto-launch Soundmodem | Off | Only the **Exe Path** you set. There is no default location. |
+| KISS TNC | (none) | | No modem program is used. |
 | Local test | (none) | | No modem program is used. |
 
 If the program is found somewhere other than the configured path, that path is saved. If it is
@@ -206,8 +208,8 @@ macro bar, the S/N graph, and the status bar.
   last 20 stations you called, most recent first. Text is converted to upper case.
 - **Via 1 / Via 2** — digipeaters for the path. Each offers **None** plus the last 10 digipeaters
   you used, and you can type a new one. The last call's choice (None included) comes back the
-  next time Aether Term starts. Digipeaters work with VARA FM and Soundmodem only. See
-  [Digipeaters](#52-digipeaters-vara-fm-and-soundmodem).
+  next time Aether Term starts. Digipeaters work with VARA FM, Soundmodem and a KISS TNC only.
+  See [Digipeaters](#52-digipeaters-vara-fm-soundmodem-and-kiss-tnc).
 - **Connect** — starts the connection. Enabled only while disconnected.
 - **Disconnect** — ends the session, or stops a connection that is still being set up.
 - **Clear** — clears the terminal window. It does not affect the session or the session log.
@@ -216,7 +218,7 @@ Target, Via 1 and Via 2 are locked while a connection is under way.
 
 ### 4.3 Connection bar, row 2
 
-- **Mode dropdown** — VARA FM, VARA HF, Aether HF, Soundmodem, Local test. Changing it closes
+- **Mode dropdown** — VARA FM, VARA HF, Aether HF, Soundmodem, KISS TNC, Local test. Changing it closes
   the old modem's link and program and starts the new one if its auto-launch setting is on.
   It is locked while connected or connecting; trying to switch then prints "Disconnect before
   switching to ...".
@@ -280,10 +282,10 @@ From left to right:
 |---|---|
 | State | `DISCONNECTED` (red), `MODEM READY`, `INITIALIZING`, `CONNECTING...`, `DISCONNECTING...` (yellow), `CONNECTED` (green) |
 | S/N | Last S/N from the modem, for example `S/N: 12 dB` |
-| BW | Bandwidth. Before a call: the HF bandwidth for VARA HF and Aether HF (`BW: 500 Hz`), the FM bandwidth setting for VARA FM (`BW: WIDE`), `—` for Soundmodem and Local test. During a call, the value the modem reports with `CONNECTED`, if it reports one. |
+| BW | Bandwidth. Before a call: the HF bandwidth for VARA HF and Aether HF (`BW: 500 Hz`), the FM bandwidth setting for VARA FM (`BW: WIDE`), `—` for Soundmodem, KISS TNC and Local test. During a call, the value the modem reports with `CONNECTED`, if it reports one. |
 | Speed | Link speed from the modem's `BITRATE` report, for example `Speed: 1234 bps (mode 9)` |
 | Duration | Length of the current session |
-| Modem | `Modem: Not connected`, `Modem: Connected`, `Modem: Error`, or the modem's version (Aether HF answers `VERSION`). In Local test mode this field shows the BBS: see [Local test](#56-local-test-no-radio). |
+| Modem | `Modem: Not connected`, `Modem: Connected`, `Modem: Error`, or the modem's version (Aether HF answers `VERSION`). In KISS TNC mode it shows the TNC link, for example `TNC: COM5` or `TNC: not connected`. In Local test mode this field shows the BBS: see [Local test](#56-local-test-no-radio). |
 | BBS link | `BBS link: <type>`: the link type the Aether BBS reports for this session (`;TRANSPORT`) |
 | Aether | Aether HF mode only. See [Aether HF](#54-aether-hf). Click it for the full status. |
 | TX | `● TX` in red while Aether Term is keying the radio (VARA HF, or Aether HF with host-program keying). Not shown with *None (VOX)* or when the modem keys the radio itself. |
@@ -322,7 +324,7 @@ Pressing **Disconnect** during a session sends `DISCONNECT` to the modem and wai
 report the end of the link. With VARA HF the radio stays keyable until then, so the other
 station hears the disconnect frames.
 
-### 5.2 Digipeaters (VARA FM and Soundmodem)
+### 5.2 Digipeaters (VARA FM, Soundmodem and KISS TNC)
 
 Enter digipeaters in **Via 1** and **Via 2**:
 
@@ -332,7 +334,7 @@ Enter digipeaters in **Via 1** and **Via 2**:
 - Choose **None** in both boxes for a direct connection.
 
 Digipeaters are refused in VARA HF, Aether HF and Local test modes with the message "Digipeaters
-are supported with VARA FM and Soundmodem." Set both boxes to None or switch modes.
+are supported with VARA FM, Soundmodem and a KISS TNC." Set both boxes to None or switch modes.
 
 **VARA FM needs a registered VARA license to connect through digipeaters.** Aether Term reminds
 you of this when you call through a digipeater. If VARA reports `LINK UNREGISTERED` on such a
@@ -340,6 +342,9 @@ call, Aether Term says that VARA FM requires a license for digipeaters.
 
 With Soundmodem the path is sent with each call (AGWPE "connect via" frame). Soundmodem's own
 Digi settings are for Soundmodem acting as a digipeater, not for the path of your calls.
+
+With a KISS TNC, Aether Term puts the path in every frame itself and waits longer for answers
+(the retry time is multiplied by 2 × digipeaters + 1).
 
 ### 5.3 VARA FM and VARA HF
 
@@ -460,7 +465,7 @@ radio port.
 
 - The TNC keys the radio. Aether Term's PTT settings are not used.
 - Aether Term makes one attempt to reach the TNC; **Max Retries** does not apply.
-- Digipeaters work (see [5.2](#52-digipeaters-vara-fm-and-soundmodem)).
+- Digipeaters work (see [5.2](#52-digipeaters-vara-fm-soundmodem-and-kiss-tnc)).
 - **An unanswered call is cancelled after 60 seconds**: Aether Term tells the TNC to stop calling
   and prints "No answer from *&lt;target&gt;* in 60 s — call cancelled". Disconnect while calling
   also cancels the call.
@@ -517,6 +522,52 @@ Other points:
   stopped, the status bar shows `Local test: BBS detached — waiting for it on 8500/8501`.
 - Digipeaters, PTT and the modem auto-launch do not apply.
 - Connection profiles have no Local test mode. Choosing a profile switches to the profile's mode.
+
+### 5.7 KISS TNC
+
+KISS TNC mode talks straight to a TNC with no Soundmodem or other program in between: the TNC
+built into a radio such as the Kenwood TH-D74 or TH-D75, a Bluetooth LE radio or TNC
+(Vero VR-N76 / VR-N7600, Mobilinkd), a hardware TNC, or Direwolf. It works like EasyTerm or
+VARA Terminal's KISS mode. Aether Term runs the AX.25 connection itself (calls, numbered frames,
+acknowledgements, retries, digipeater paths); the TNC only sends and receives packets.
+
+Choose **KISS TNC** in the toolbar, then set **Settings → Modem Configuration → KISS TNC → Connect
+via**:
+
+- **Bluetooth or USB serial port (COM)** — for a radio paired over Bluetooth Classic or plugged
+  in with USB, and for serial TNCs. Pick the port and click **Refresh** if it is missing.
+  - *Kenwood TH-D74 / TH-D75 over Bluetooth:* pair the radio in Windows Bluetooth settings. Windows
+    creates two COM ports; use the outgoing one, named *Standard Serial over Bluetooth link*. On
+    the radio, switch the built-in TNC to **KISS** mode and choose its band and speed (1200 or
+    9600 baud on the air). The baud rate setting in Aether Term does not matter for Bluetooth.
+  - *Over USB:* install the radio's USB driver, pick its COM port, and set the baud rate the
+    radio's manual gives for the TNC.
+- **Bluetooth Low Energy (BLE)** — for radios and TNCs that offer KISS over BLE (VR-N76,
+  VR-N7600, UV-Pro, Mobilinkd TNC3/TNC4 and similar). Turn on the radio's KISS TNC, press
+  **Scan** and pick the radio; devices that advertise the KISS service are listed first. The
+  **BLE service** field holds the service UUID; leave it empty for the usual KISS-over-BLE
+  service (`00000001-ba2a-46c9-ae49-01b0961f68bb`). *BLE support is new and has not yet been
+  tested with these radios.*
+- **TCP** — for Direwolf (port 8001) or a network TNC.
+
+When you press Connect, Aether Term opens the link to the TNC (the status bar shows
+`TNC: COM5`, `TNC: BLE <address>` or `TNC: 127.0.0.1:8001`), sends the TNC its settings if
+**Send TXDELAY, persistence and slot time** is on, and calls the target. Disconnect ends the call
+and closes the link to the TNC, so the radio is free for other programs between sessions.
+
+Other points:
+
+- **TNC port** is 0 for radios and single-port TNCs.
+- **Init commands** are for TNC2-style TNCs that must be told to enter KISS mode, for example
+  `KISS ON\rRESTART`. Leave the field empty for radios; they are set to KISS from their menus.
+- **Packet length**, **Window (MAXFRAME)**, **Retry time (FRACK)** and **Retries** are the usual
+  AX.25 settings. The defaults (128, 4, 7 s, 10) suit 1200 baud. On a busy channel or a weak
+  link, a smaller window and packet length help.
+- Digipeaters work (see [5.2](#52-digipeaters-vara-fm-soundmodem-and-kiss-tnc)).
+- A call that gets no answer ends with "TNC: no answer from *&lt;target&gt;* after *N* tries". If the
+  other station stops answering during a session, the session ends with "TNC: link lost".
+- Every AX.25 frame sent and received is written to the program log.
+- Profiles can use KISS TNC mode. PTT, bandwidth and the modem auto-launch do not apply.
 
 ---
 
@@ -640,10 +691,10 @@ A profile stores a whole connection setup. Manage them in **Settings → Connect
 | My Callsign / My SSID | The operator for this profile. Blank: your global callsign from Settings. |
 | Tactical Address | Optional. Sent as `;TACTICAL <address>` after login (see [9.2](#92-tactical-address)). |
 | Target Callsign | The BBS to call. Required to connect from the profile. |
-| Mode | VARA FM, VARA HF, Aether HF or Soundmodem (AGWPE) |
+| Mode | VARA FM, VARA HF, Aether HF, Soundmodem (AGWPE) or KISS TNC |
 | FM Bandwidth | WIDE (default) or NARROW, for VARA FM profiles |
 | HF Bandwidth | 500, 2300 or 2750. Aether HF uses 500 or 2300 (2750 runs as 2300). |
-| Via 1 / Via 2 | Digipeaters, for VARA FM and Soundmodem profiles |
+| Via 1 / Via 2 | Digipeaters, for VARA FM, Soundmodem and KISS TNC profiles |
 
 - **Add** creates "New Profile" and saves it at once. Fill in the fields and click **Save
   Changes**.
@@ -693,7 +744,7 @@ for its tooltip.
 |---|---|---|---|
 | Station Identity | My Callsign | (empty) | Up to 10 characters, saved in upper case |
 | | SSID | 0 | 0 to 15; 0 means none |
-| Modem | VARA FM / VARA HF / Aether HF / Soundmodem (AGWPE) / Local test (no radio) | VARA FM | Same as the toolbar mode dropdown |
+| Modem | VARA FM / VARA HF / Aether HF / Soundmodem (AGWPE) / KISS TNC / Local test (no radio) | VARA FM | Same as the toolbar mode dropdown |
 | HF Settings (VARA HF only) | Session Bandwidth (Hz) | 500 | 500, 2300, 2750 |
 | | Session Type | P2P (BBS or station) | Or *Winlink gateway* |
 | Aether HF Settings (Aether HF only) | Bandwidth (Hz) | 2300 | 2300 or 500; both stations must match |
@@ -772,6 +823,27 @@ Port** is read-only and always the command port + 1.
 | Connect as | (empty) | Empty: your own callsign |
 
 The panel also repeats the BBS setup steps from [5.6](#56-local-test-no-radio).
+
+**KISS TNC** (see [5.7](#57-kiss-tnc))
+
+| Setting | Default | Notes |
+|---|---|---|
+| Connect via | Bluetooth or USB serial port (COM) | Or Bluetooth Low Energy (BLE), or TCP |
+| Serial port | (none) | With **Refresh** |
+| Baud rate | 9600 | 1200 to 115200. Not used over Bluetooth. |
+| BLE device | (none) | With **Scan**, or type the address |
+| BLE service | (empty) | Empty: the standard KISS-over-BLE service |
+| TCP host / TCP port | 127.0.0.1 / 8001 | Direwolf's KISS port is 8001 |
+| TNC port | 0 | 0 to 15 |
+| Send TXDELAY, persistence and slot time to the TNC | On | Off keeps the radio's own settings |
+| TXDELAY | 300 ms | |
+| Persistence | 63 | 0 to 255 (63 = 25 %) |
+| Slot time | 100 ms | |
+| Init commands | (empty) | Text sent before KISS starts; `\r` separates commands |
+| Packet length | 128 | 16 to 256 bytes |
+| Window (MAXFRAME) | 4 | 1 to 7 |
+| Retry time (FRACK) | 7 s | 1 to 30 s, longer through digipeaters |
+| Retries | 10 | 1 to 30 |
 
 ### 8.3 Security
 
@@ -873,12 +945,21 @@ or the modem ends it, or the modem link is lost. When the BBS ends the session, 
 | `[AETHER] No session with <target>. ...` | The call ended without a session. Check that the other station runs Aether HF on the same bandwidth; Aether HF's Log tab has the reason. |
 | `Aether HF not found.` | Install Aether HF or set its path in **Settings → Modem Configuration**. |
 | `<mode> modem not found.` / `<mode> executable not found: <path>` | Auto-launch is on but the program is not at the path. Set the path or turn auto-launch off. |
-| `Digipeaters are supported with VARA FM and Soundmodem.` | Set Via 1 and Via 2 to None for this mode. |
+| `Digipeaters are supported with VARA FM, Soundmodem and a KISS TNC.` | Set Via 1 and Via 2 to None for this mode. |
 | `'<call>' is not a valid digipeater callsign.` / `At most 2 digipeaters ...` | Fix the Via fields. |
 | `No answer from <target> in 60 s — call cancelled` | Soundmodem call not answered. |
 | `Local test: can't listen on 127.0.0.1 ports 8500/8501 (...)`, status bar `Local test: ports in use` | Another program uses those ports. Choose others in **Settings → Modem Configuration → Local test**, and change the BBS instance to match. |
 | `Local test: no BBS has attached yet — start its local test instance first.` / `Local test: the BBS has not attached to ports ... yet.` | Start or restart the BBS instance (BBS Settings → Instances, or its dashboard). |
 | `Local test: the BBS has not sent its callsign (MYCALL) yet.` | The BBS is still starting. Wait and press Connect again. |
+| `TNC: cannot open COM<n>: ...` | The port is wrong or another program holds it. For a Bluetooth radio, check that it is paired, switched on and in range, and that you chose the outgoing COM port. |
+| `TNC: cannot connect to the TNC at <host>:<port>` | Direwolf or the network TNC is not running, or its KISS port differs. |
+| `TNC: no serial port chosen ...` / `TNC: no Bluetooth LE device chosen ...` | Pick the port or device in **Settings → Modem Configuration → KISS TNC**. |
+| `TNC: pyserial is not installed` / `TNC: Bluetooth LE needs the bleak package ...` | Source install only: `pip install pyserial bleak`. |
+| `TNC: cannot connect to <address> over Bluetooth LE: ...` / `... has no KISS TNC service ...` | The radio is off, out of range, connected to another device (a phone app), or its KISS TNC is not turned on. |
+| `TNC: no answer from <target> after <n> tries` | The call was not answered. Check the frequency, the radio's TNC speed (1200 / 9600) and the target callsign. |
+| `TNC: <target> is busy or refused the call` | The station answered with DM. |
+| `TNC: link lost: no answer from <target> after <n> polls` | The other station stopped answering during the session. |
+| `Lost the TNC (<link>): ...` | The COM port, Bluetooth link or TCP connection closed (radio switched off, out of range). |
 | `[AUTH] No saved password — manual auth required` | See [6.3](#63-no-saved-password). |
 | `[AUTH] Authentication FAILED ✗ — check saved password` | The saved password is wrong for this BBS, or a different entry was used (check the lookup order in [6.2](#62-saving-passwords)). |
 | `[WLREG] No BBS password saved — cannot encrypt Winlink password` | Save the BBS password first. |
@@ -910,8 +991,8 @@ BBS instance, and check that the instance's Host is `127.0.0.1` and its ports ma
 ### 10.3 Logs
 
 - **Program log**: `%USERPROFILE%\Aether Term\logs\aether-term.log` (`~/Aether Term/logs/` on
-  Linux). It records every modem command and event, PTT activity, AGWPE frames, update checks and
-  errors. Include it with a bug report.
+  Linux). It records every modem command and event, PTT activity, AGWPE and AX.25 (KISS) frames,
+  update checks and errors. Include it with a bug report.
 - **Session logs**: in the same folder, one per session (see [7.4](#74-session-logs)).
 - If `start_aether_term.bat` ends with an error, it prints the program log's path.
 
