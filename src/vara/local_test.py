@@ -4,7 +4,7 @@ vara/local_test.py — Local test mode: talk to the BBS on this PC, no radio.
 The Aether BBS reaches VARA FM through VARA's TCP host interface: it
 connects to the modem's command and data ports.  In local test mode
 Aether Term plays that modem.  It listens on 127.0.0.1 only, and a BBS
-instance set up for local test (Transport VARA FM, Host 127.0.0.1, these
+instance set up for local test (Transport VARA FM, these
 ports) attaches to it.  Pressing Connect then reports an inbound call
 from you to the BBS, and the session runs over the data port exactly as
 it would over the air.

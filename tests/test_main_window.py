@@ -759,3 +759,74 @@ def test_macro_buttons_are_built_once_and_rebuilt(qapp, win):
     win._refresh_macros()
     assert [b.text() for b in win.macro_buttons] == ["Mine"]
     assert win.macro_frame.layout().count() == 3  # "Quick:", Mine, stretch
+
+
+# ── 1.1.11: no second call on top of a live one ────────────────────
+
+def test_connect_is_refused_during_a_session(qapp, win):
+    win._on_connect()
+    assert pump(qapp, until=lambda: "CONNECTED to W1AW-5" in text(win), timeout=15)
+    assert not win.connect_action.isEnabled()
+    connects = win.fake.commands.count("CONNECT KK4ODA W1AW-5")
+    win.connect_action.trigger()                # File → Connect / Ctrl+Shift+C
+    pump(qapp, 1.0)
+    assert win.fake.commands.count("CONNECT KK4ODA W1AW-5") == connects
+    assert text(win).count("Connecting to W1AW-5") == 1
+    win._on_disconnect()
+    assert pump(qapp, until=lambda: win.connect_action.isEnabled(), timeout=15)
+
+
+def test_settings_cannot_change_the_mode_during_a_session(qapp, win, monkeypatch):
+    from gui import main_window
+    seen = {}
+
+    class Dialog(main_window.SettingsDialog):
+        def exec(self):
+            seen["locked"] = [b.isEnabled() for b in self.mode_group.buttons()]
+            return 0
+    monkeypatch.setattr(main_window, "SettingsDialog", Dialog)
+    win._open_settings()
+    assert seen["locked"] and all(seen["locked"])        # free while idle
+    win._on_connect()
+    assert pump(qapp, until=lambda: "CONNECTED to W1AW-5" in text(win), timeout=15)
+    win._open_settings()
+    assert not any(seen["locked"])
+
+
+# ── 1.1.11: saved passwords and the operator's SSID ───────────────
+
+@pytest.mark.parametrize("saved_as,connect_as", [
+    ("KK4ODA-7", "KK4ODA-2"),
+    ("KK4ODA-7", "KK4ODA"),
+    ("KK4ODA", "KK4ODA-2"),
+])
+def test_password_is_found_for_any_ssid_of_the_operator(home, saved_as, connect_as):
+    from passwords import PasswordStore
+    from config import Config
+    store = PasswordStore(Config().app_data_dir)
+    store.set_password("W1AW-5", "pw", operator=saved_as)
+    assert store.get_password("W1AW-5", connect_as) == "pw"
+    assert store.get_password("W1AW-5", "N0CALL") is None
+
+
+def test_exact_operator_entry_wins_over_another_ssid(home):
+    from passwords import PasswordStore
+    from config import Config
+    store = PasswordStore(Config().app_data_dir)
+    store.set_password("W1AW-5", "seven", operator="KK4ODA-7")
+    store.set_password("W1AW-5", "two", operator="KK4ODA-2")
+    store.set_password("W1AW-5", "base", operator="KK4ODA")
+    assert store.get_password("W1AW-5", "KK4ODA-2") == "two"
+    assert store.get_password("W1AW-5", "KK4ODA-9") == "base"
+
+
+def test_auto_login_off_says_so_and_shows_the_prompt(qapp, win):
+    win.config.set("auto_respond_hmac", False)
+    win._target = "W1AW-5"
+    win.passwords.set_password("W1AW-5", "secret", operator=win._effective_callsign())
+    win._on_data_received(";AUTH HMAC-SHA256 " + "ab" * 16 + "\r\n")
+    win._on_data_received("Enter password: ")
+    pump(qapp, 1.5)
+    assert "Automatic login is off" in text(win)
+    assert "No saved password" not in text(win)
+    assert "Enter password" in text(win)
