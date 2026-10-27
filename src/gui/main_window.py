@@ -186,10 +186,10 @@ class MainWindow(QMainWindow):
 
         # File
         file_menu = menubar.addMenu("&File")
-        connect_action = QAction("&Connect", self)
-        connect_action.setShortcut("Ctrl+Shift+C")
-        connect_action.triggered.connect(self._on_connect)
-        file_menu.addAction(connect_action)
+        self.connect_action = QAction("&Connect", self)
+        self.connect_action.setShortcut("Ctrl+Shift+C")
+        self.connect_action.triggered.connect(self._on_connect)
+        file_menu.addAction(self.connect_action)
 
         disconnect_action = QAction("&Disconnect", self)
         disconnect_action.triggered.connect(self._on_disconnect)
@@ -538,6 +538,8 @@ class MainWindow(QMainWindow):
 
     def _on_connect(self):
         """Initiate a connection to the target BBS."""
+        if self._busy():
+            return                  # a call is already under way
         callsign = self._effective_callsign()
         if not callsign:
             QMessageBox.warning(self, "Configuration Error",
@@ -1108,10 +1110,10 @@ class MainWindow(QMainWindow):
             elif action.is_warning:
                 self.terminal.display.append_warning(action.display_text)
                 if action.is_auth_event and password is None:
-                    op = self._effective_callsign()
+                    op = self._effective_callsign().split("-")[0]
                     self.terminal.display.append_system(
                         f"  (No password saved for station {target} with operator "
-                        f"{op} or blank. Add one in Settings → Security / "
+                        f"{op} (any SSID) or blank. Add one in Settings → Security / "
                         "Passwords to log in automatically.)")
             else:
                 self.terminal.display.append_system(action.display_text)
@@ -1212,13 +1214,19 @@ class MainWindow(QMainWindow):
 
         self._update_ui_state()
 
+    def _busy(self) -> bool:
+        """A call is being set up, is up, or is ending."""
+        return (self.modem.state != ConnectionState.DISCONNECTED
+                or self._preflight_pending)
+
     def _update_ui_state(self):
         """Enable/disable buttons based on connection state."""
         state = self.modem.state
         connected = state == ConnectionState.CONNECTED
         disconnected = state == ConnectionState.DISCONNECTED
 
-        self.connect_btn.setEnabled(disconnected and not self._preflight_pending)
+        self.connect_btn.setEnabled(not self._busy())
+        self.connect_action.setEnabled(not self._busy())
         self.disconnect_btn.setEnabled(not disconnected)
         self.target_input.setEnabled(disconnected)
         self.via1_input.setEnabled(disconnected)
@@ -1226,8 +1234,8 @@ class MainWindow(QMainWindow):
         self.terminal.set_input_enabled(connected)
 
         # Lock mode switching while any connection activity is happening
-        self.mode_combo.setEnabled(disconnected and not self._preflight_pending)
-        self.profile_combo.setEnabled(disconnected and not self._preflight_pending)
+        self.mode_combo.setEnabled(not self._busy())
+        self.profile_combo.setEnabled(not self._busy())
 
         # Sync combo selection with config (e.g. after Settings dialog)
         expected_idx = _MODE_INDEX.get(self.config.mode, 0)
@@ -1799,7 +1807,8 @@ class MainWindow(QMainWindow):
 
     def _open_settings(self, tab: int = 0):
         old_mode = self.config.mode
-        dlg = SettingsDialog(self.config, self)
+        # The mode can't change under a call: switching closes the modem
+        dlg = SettingsDialog(self.config, self, mode_locked=self._busy())
         if hasattr(dlg, 'tabs'):
             dlg.tabs.setCurrentIndex(tab)
         if dlg.exec():

@@ -129,41 +129,45 @@ class PasswordStore:
             return f"{operator.upper().strip()}@{target}"
         return target
 
-    def get_password(self, callsign: str,
-                     operator: str = "") -> Optional[str]:
-        """Return the stored password for a callsign, or None.
+    def _find(self, callsign: str, operator: str = "") -> Optional[dict]:
+        """The stored entry for a target and operator, or None.
 
         Lookup order (first match wins):
-          1. OPERATOR@TARGET       (composite, exact target)
-          2. OPERATOR@BASE_TARGET  (composite, SSID-stripped target)
-          3. BASE_TARGET           (legacy, SSID-stripped)
-          4. TARGET                (legacy, exact)
+          1. OPERATOR@TARGET, then OPERATOR@BASE_TARGET
+          2. the same with the operator's base call (no SSID), then any
+             other SSID of it: the BBS knows the operator by base call
+          3. BASE_TARGET, then TARGET  (legacy, no operator)
         """
         target = callsign.upper().strip()
         base_target = target.split("-")[0]
+        targets = [target] if base_target == target else [target, base_target]
 
         if operator:
             op = operator.upper().strip()
-            # 1. composite exact
-            entry = self._passwords.get(f"{op}@{target}")
-            if entry:
-                return entry.get("password")
-            # 2. composite base
-            if base_target != target:
-                entry = self._passwords.get(f"{op}@{base_target}")
-                if entry:
-                    return entry.get("password")
+            base_op = op.split("-")[0]
+            ops = [op] if base_op == op else [op, base_op]
+            for o in ops:
+                for t in targets:
+                    entry = self._passwords.get(f"{o}@{t}")
+                    if entry:
+                        return entry
+            for t in targets:
+                for key in sorted(self._passwords):
+                    o, sep, kt = key.partition("@")
+                    if sep and kt == t and o.split("-")[0] == base_op:
+                        return self._passwords[key]
 
-        # 3. legacy base
-        entry = self._passwords.get(base_target)
-        if entry:
-            return entry.get("password")
-        # 4. legacy exact
-        if base_target != target:
-            entry = self._passwords.get(target)
+        for t in reversed(targets):          # legacy: base first
+            entry = self._passwords.get(t)
             if entry:
-                return entry.get("password")
+                return entry
         return None
+
+    def get_password(self, callsign: str,
+                     operator: str = "") -> Optional[str]:
+        """Return the stored password for a callsign, or None (see _find)."""
+        entry = self._find(callsign, operator)
+        return entry.get("password") if entry else None
 
     def set_password(self, callsign: str, password: str,
                      auth_mode: str = "HMAC-SHA256",
@@ -185,21 +189,8 @@ class PasswordStore:
             self._save()
 
     def update_last_used(self, callsign: str, operator: str = ""):
-        """Update last-used timestamp, searching composite then legacy keys."""
-        target = callsign.upper().strip()
-        base_target = target.split("-")[0]
-
-        entry = None
-        if operator:
-            op = operator.upper().strip()
-            entry = self._passwords.get(f"{op}@{target}")
-            if not entry and base_target != target:
-                entry = self._passwords.get(f"{op}@{base_target}")
-        if not entry:
-            entry = self._passwords.get(base_target)
-        if not entry and base_target != target:
-            entry = self._passwords.get(target)
-
+        """Update the last-used timestamp of the entry get_password uses."""
+        entry = self._find(callsign, operator)
         if entry:
             entry["last_used"] = datetime.now(timezone.utc).isoformat()
             self._save()

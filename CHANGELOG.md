@@ -21,6 +21,40 @@ Format: [version] — YYYY-MM-DD, then a bulleted list of changes.
 
 ---
 
+## [1.1.11] — 2026-10-27
+
+### Fixed
+
+- **Connect can't start a second call during a session.** File → Connect
+  (Ctrl+Shift+C) stayed available while connected and opened a second
+  connection on top of the live one. It is now greyed out like the
+  Connect button.
+- **The mode can't be changed in Settings during a call.** The toolbar
+  already refused, but Settings did not, and pressing OK closed the modem
+  program mid-session. The mode buttons in Settings are greyed out while
+  a call is under way.
+- **Hamlib's Dummy rig no longer passes for a radio.** With the default
+  rig model (Hamlib Dummy), Aether Term reported "PTT connected" but
+  never keyed the radio. Connect now stops and asks you to choose your
+  radio's model.
+- **A saved password is used for any SSID of your callsign.** A password
+  saved for operator KK4ODA-7 was not used when you connected as KK4ODA
+  or KK4ODA-2. An entry for your exact callsign still comes first.
+- **Automatic login turned off no longer says "No saved password".** With
+  a password saved and *Auto-respond to HMAC challenges* off, the
+  terminal now says automatic login is off, and shows the BBS's password
+  prompt (it was hidden).
+- **FM Bandwidth says what it does.** VARA FM has no command for the
+  narrow/wide setting, so Aether Term only shows it in the status bar;
+  its tooltip now says to set the real bandwidth in VARA FM's setup.
+- **Local test help:** the BBS instance form has no Host field, so the
+  help no longer tells you to set one.
+- Tooltips: the VARA HF bandwidth default is 500 Hz, Soundmodem
+  auto-launch starts it with Aether Term and on switching modes, and
+  profile digipeaters work with Soundmodem too.
+
+---
+
 ## [1.1.10] — 2026-10-17
 
 ### Fixed

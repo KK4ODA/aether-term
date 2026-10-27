@@ -70,7 +70,8 @@ test is what a station on the air gets.
    Modem → Local test (no radio)**). The status bar shows *waiting for the BBS on 8500/8501*
    and the title bar says *LOCAL TEST — not on the air*.
 2. In **Aether BBS**, open **Settings → Instances** and add an instance: Name *Local test*,
-   Transport *VARA FM*, Host `127.0.0.1`, Cmd port `8500`, Data port `8501`, Auto Start off.
+   Transport *VARA FM*, Cmd port `8500`, Data port `8501`, Auto Start off (the BBS reaches VARA
+   on `127.0.0.1`; its form has no Host field).
    Save, then start or enable it. The BBS tries to reach the modem 5 times over about 15
    seconds and then gives up; if Aether Term wasn't ready, start the instance again from the
    BBS dashboard. Aether Term's status bar then shows *&lt;BBS call&gt; attached on 8500/8501*.

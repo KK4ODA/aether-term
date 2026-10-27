@@ -26,9 +26,10 @@ log = logging.getLogger(__name__)
 class SettingsDialog(QDialog):
     """Main settings dialog with tabbed interface."""
 
-    def __init__(self, config, parent=None):
+    def __init__(self, config, parent=None, mode_locked: bool = False):
         super().__init__(parent)
         self.config = config
+        self.mode_locked = mode_locked
         self.setWindowTitle("Aether Term Settings")
         self.setMinimumWidth(520)
         self.setMinimumHeight(460)
@@ -38,6 +39,10 @@ class SettingsDialog(QDialog):
             self.setStyleSheet(parent.styleSheet())
         self._build_ui()
         self._load_values()
+        if mode_locked:
+            for b in self.mode_group.buttons():
+                b.setEnabled(False)
+                b.setToolTip("Disconnect before changing the mode.")
 
     # ── UI construction ────────────────────────────────────────────
 
@@ -138,8 +143,8 @@ class SettingsDialog(QDialog):
         self.hf_bw_combo.addItems(["500", "2300", "2750"])
         self.hf_bw_combo.setToolTip(
             "VARA HF session bandwidth.\n"
-            "500 Hz = slower but more robust in poor conditions.\n"
-            "2300 Hz = balanced (default).\n"
+            "500 Hz = slower but more robust in poor conditions (default).\n"
+            "2300 Hz = balanced.\n"
             "2750 Hz = fastest, needs good signal."
         )
         hf_form.addRow("Session Bandwidth (Hz):", self.hf_bw_combo)
@@ -174,7 +179,8 @@ class SettingsDialog(QDialog):
         self.fm_bw_combo = QComboBox()
         self.fm_bw_combo.addItems(["NARROW", "WIDE"])
         self.fm_bw_combo.setToolTip(
-            "VARA FM bandwidth mode.\n"
+            "Shown in the status bar. Set the real bandwidth in VARA FM's\n"
+            "own setup (FM System): VARA FM has no command for it.\n"
             "NARROW = 1200 Hz (12.5 kHz channel spacing).\n"
             "WIDE = 2300 Hz (25 kHz channel spacing)."
         )
@@ -438,8 +444,8 @@ class SettingsDialog(QDialog):
         agwpe_form.addRow("AGWPE Port:", self.agwpe_port)
         self.agwpe_auto_launch = QCheckBox("Auto-launch Soundmodem")
         self.agwpe_auto_launch.setToolTip(
-            "Start the Soundmodem executable automatically\n"
-            "when connecting in AGWPE mode."
+            "Start the Soundmodem executable when Aether Term starts\n"
+            "and when you switch to Soundmodem mode, and close it on exit."
         )
         agwpe_form.addRow(self.agwpe_auto_launch)
         self.agwpe_exe = QLineEdit()
@@ -478,9 +484,10 @@ class SettingsDialog(QDialog):
         lt_help = QLabel(
             "<b>How to set up the BBS for local test</b><ol>"
             "<li>In Aether BBS, open Settings → Instances and add an instance: "
-            "Name <i>Local test</i>, Transport <i>VARA FM</i>, Host "
-            "<i>127.0.0.1</i>, Cmd port <i>8500</i>, Data port <i>8501</i> "
-            "(the ports above), Auto Start off. Save.</li>"
+            "Name <i>Local test</i>, Transport <i>VARA FM</i>, Cmd port "
+            "<i>8500</i>, Data port <i>8501</i> (the ports above), Auto Start "
+            "off. Save. (The BBS reaches VARA on 127.0.0.1; its form has no "
+            "Host field.)</li>"
             "<li>Start local test mode in Aether Term first, then start or "
             "enable that instance in the BBS. The BBS tries to reach the "
             "modem 5 times over about 15 seconds and then gives up; if Aether "

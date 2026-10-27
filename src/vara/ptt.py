@@ -30,6 +30,9 @@ log = logging.getLogger(__name__)
 # a PTT OFF within 90s of keying, force-release as a safety measure.
 WATCHDOG_TIMEOUT = 90.0
 
+# Hamlib's "Dummy" rig (model 1, also the default) keys nothing
+HAMLIB_DUMMY_MODEL = 1
+
 
 def _make_rig(method: str, config):
     """The rig client for an ``hf_ptt_method`` setting (not yet started)."""
@@ -39,6 +42,11 @@ def _make_rig(method: str, config):
         return OmniRigClient(rig_number=config.get("omnirig_rig_number", 1))
     if method == PTT_HAMLIB:
         from vara.hamlib import HamlibClient
+        if config.get("hamlib_rig_model", 1) == HAMLIB_DUMMY_MODEL:
+            raise ValueError(
+                "Hamlib is set to its Dummy rig, which keys no radio. Choose "
+                "your radio under Settings → Modem Configuration → HF PTT "
+                "Control → Rig Model.")
         return HamlibClient(
             host=config.get("hamlib_rigctld_host", "127.0.0.1"),
             port=config.get("hamlib_rigctld_port", 4532),

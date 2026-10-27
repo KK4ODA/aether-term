@@ -187,7 +187,7 @@ macro bar, the S/N graph, and the status bar.
 
 | Menu | Item | What it does |
 |---|---|---|
-| File | Connect (Ctrl+Shift+C) | Same as the Connect button |
+| File | Connect (Ctrl+Shift+C) | Same as the Connect button; unavailable while a call is under way |
 | | Disconnect | Same as the Disconnect button |
 | | Exit (Ctrl+Q) | Closes Aether Term (and any modem program it started) |
 | Settings | Terminal Setup... | Settings, Terminal Setup tab |
@@ -353,8 +353,8 @@ Modem Configuration → VARA FM Modem / VARA HF Modem → Command Port** (defaul
 port is always the command port + 1.
 
 **VARA FM** keys the radio itself. The **FM Bandwidth** setting (NARROW/WIDE) is shown in the
-status bar and stored in profiles, but Aether Term does not send it to VARA FM: set the bandwidth
-in VARA FM itself.
+status bar and stored in profiles. VARA FM has no host command for it, so set the real bandwidth
+in VARA FM's own setup (FM System) to match.
 
 **VARA HF** settings, in **Settings → Terminal Setup → HF Settings**:
 
@@ -391,7 +391,7 @@ the order VARA sent them. Safety releases:
 
 | Field | Default | Notes |
 |---|---|---|
-| Rig Model | Hamlib Dummy (test) [1] | Choose your radio. Type to search. **With the Dummy model, rigctld accepts PTT commands but no radio is keyed.** |
+| Rig Model | Hamlib Dummy (test) [1] | Choose your radio. Type to search. The Dummy model keys no radio, so Connect stops with "Hamlib is set to its Dummy rig, which keys no radio" until you choose yours. |
 | Serial Port | (empty) | CAT port, for example `COM3` |
 | Serial Speed | Auto | Auto, 4800 to 115200 |
 | rigctld Host | 127.0.0.1 | |
@@ -494,7 +494,6 @@ gets.
    |---|---|
    | Name | Local test |
    | Transport | VARA FM |
-   | Host | 127.0.0.1 |
    | Cmd port | 8500 |
    | Data port | 8501 |
    | Auto Start | off |
@@ -593,7 +592,9 @@ The password itself is never sent. On screen you see:
 
 The protocol lines and the BBS's "Enter password:" prompt are hidden while this happens. To see
 the raw lines, tick **Settings → Security → Show auth protocol messages in terminal (debug)**.
-To stop automatic answers, untick **Auto-respond to HMAC challenges**.
+To stop automatic answers, untick **Auto-respond to HMAC challenges**. The terminal then shows
+"[AUTH] Automatic login is off (Settings → Security) — manual auth required" and the BBS's
+password prompt, and you type the answer yourself.
 
 If the BBS rejects the answer, the terminal shows "[AUTH] Authentication FAILED ✗ — check saved
 password" in red.
@@ -616,22 +617,24 @@ In the Add Password window:
   and add a new one instead.
 - **Password** — tick **Show password** to see what you typed.
 
-**Which password is used.** When connecting as operator `KK4ABC` to target `KK4ODA-5`, Aether
+**Which password is used.** When connecting as operator `KK4ABC-7` to target `KK4ODA-5`, Aether
 Term tries, in this order, and uses the first one it finds:
 
 | Order | Operator | Target |
 |---|---|---|
-| 1 | KK4ABC | KK4ODA-5 |
-| 2 | KK4ABC | KK4ODA |
-| 3 | (blank) | KK4ODA |
-| 4 | (blank) | KK4ODA-5 |
+| 1 | KK4ABC-7 | KK4ODA-5, then KK4ODA |
+| 2 | KK4ABC | KK4ODA-5, then KK4ODA |
+| 3 | KK4ABC with any other SSID | KK4ODA-5, then KK4ODA |
+| 4 | (blank) | KK4ODA |
+| 5 | (blank) | KK4ODA-5 |
 
 Things to know:
 
 - **The target's SSID is optional.** On the Aether BBS a password belongs to the base callsign,
   so saving the target as `KK4ODA` covers `KK4ODA-5`, `KK4ODA-10` and so on.
-- **The operator must match exactly**, SSID included. A password saved for operator `KK4ABC-7` is
-  not used when you connect as `KK4ABC`. Use a blank operator if you work under several SSIDs.
+- **The operator's SSID is optional too.** The BBS knows you by your base callsign, so a password
+  saved for operator `KK4ABC-7` is also used when you connect as `KK4ABC` or `KK4ABC-2`. An entry
+  for your exact callsign, SSID included, wins over one for another SSID.
 - With a profile, the profile's callsign is the operator. In Local test mode, the **Connect as**
   callsign is.
 
@@ -744,7 +747,7 @@ for its tooltip.
 |---|---|---|---|
 | Station Identity | My Callsign | (empty) | Up to 10 characters, saved in upper case |
 | | SSID | 0 | 0 to 15; 0 means none |
-| Modem | VARA FM / VARA HF / Aether HF / Soundmodem (AGWPE) / KISS TNC / Local test (no radio) | VARA FM | Same as the toolbar mode dropdown |
+| Modem | VARA FM / VARA HF / Aether HF / Soundmodem (AGWPE) / KISS TNC / Local test (no radio) | VARA FM | Same as the toolbar mode dropdown. Greyed out during a call. |
 | HF Settings (VARA HF only) | Session Bandwidth (Hz) | 500 | 500, 2300, 2750 |
 | | Session Type | P2P (BBS or station) | Or *Winlink gateway* |
 | Aether HF Settings (Aether HF only) | Bandwidth (Hz) | 2300 | 2300 or 500; both stations must match |
@@ -964,7 +967,9 @@ or the modem ends it, or the modem link is lost. When the BBS ends the session, 
 | `[AUTH] Authentication FAILED ✗ — check saved password` | The saved password is wrong for this BBS, or a different entry was used (check the lookup order in [6.2](#62-saving-passwords)). |
 | `[WLREG] No BBS password saved — cannot encrypt Winlink password` | Save the BBS password first. |
 | `Not connected — command not sent.` | A macro was clicked with no session. |
-| `Disconnect before switching to ...` | Mode changes are locked during a call. |
+| `Disconnect before switching to ...` | Mode changes are locked during a call. (In Settings the mode buttons are greyed out then.) |
+| `Hamlib is set to its Dummy rig, which keys no radio. ...` | Choose your radio's model in **Settings → Modem Configuration → HF PTT Control → Rig Model**. |
+| `[AUTH] Automatic login is off (Settings → Security) — manual auth required` | **Auto-respond to HMAC challenges** is off. Type the answer, or turn it back on. |
 | `Settings could not be read (...); kept as settings.json.unreadable-<time>` | `settings.json` was damaged. Aether Term started from defaults and kept the old file next to it so you can recover it. |
 | `Saved passwords could not be read (...); kept as passwords.enc.unreadable-<time>` | `passwords.enc` could not be decrypted (for example after copying it from another setup). It was kept aside; the password list starts empty. |
 | **Aether Term — unexpected error** dialog | An internal error. The details are in the program log; Aether Term keeps running. Restart it if something does not work. |
@@ -974,7 +979,7 @@ or the modem ends it, or the modem link is lost. When the BBS ends the session, 
 
 **Connect does nothing useful in VARA HF mode, and the radio never transmits.** Check the PTT
 method. With *None (VOX)* nothing is keyed by Aether Term. With *Hamlib*, check that the rig model
-is your radio and not *Hamlib Dummy*. With OmniRig, check that OmniRig shows the radio online.
+is your radio (Connect stops while it is *Hamlib Dummy*). With OmniRig, check that OmniRig shows the radio online.
 
 **The BBS answers but my commands are garbled or ignored.** Aether Term answers in the BBS's own
 line-end style once it has seen it. A BPQ node says nothing until spoken to, so your first line
@@ -982,11 +987,12 @@ goes out with a bare CR. If problems continue, the program log shows "BBS line e
 LF".
 
 **Automatic login does not happen.** Check that **Auto-respond to HMAC challenges** is on, and that
-the Password Manager has an entry whose Operator matches the callsign in the window title exactly,
-or is `(any)`.
+the Password Manager has an entry whose Operator is the callsign in the window title (any SSID), or
+is `(any)`.
 
 **Local test: the BBS never attaches.** Start Aether Term in Local test mode before starting the
-BBS instance, and check that the instance's Host is `127.0.0.1` and its ports match.
+BBS instance, and check that the instance's ports match. (The BBS always reaches VARA on
+`127.0.0.1`; its instance form has no Host field.)
 
 ### 10.3 Logs
 
