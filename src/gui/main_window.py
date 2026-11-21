@@ -29,8 +29,8 @@ from config import (Config, APP_NAME, APP_VERSION, MODE_VARA_FM,
                     MODE_KISS,
                     PTT_OMNIRIG, PTT_VOX)
 from aether.control import (AetherMonitor, AetherQuery, AetherStatus,
-                            find_aether_exe, AETHER_RELEASES_URL,
-                            AETHER_HOST_GUIDE_URL)
+                            find_aether_exe, setup_mismatches, double_keying,
+                            AETHER_RELEASES_URL, AETHER_HOST_GUIDE_URL)
 from passwords import PasswordStore
 from auth import AuthInterceptor
 from vara.modem import VARAModem, parse_digipeaters
@@ -138,6 +138,8 @@ class MainWindow(QMainWindow):
         self._active_profile: Optional[dict] = None
         self._rf_session_up = False    # a CONNECTED was seen for this call
         self._target = ""              # the station being called
+        self._call_started = 0.0       # time.time() when the call began
+        self._abort_sent = False       # Aether HF: a second Disconnect sent ABORT
         self._via: list = []           # its digipeater path
         self._prev_state = ConnectionState.DISCONNECTED
         self._bbs_shown = ""           # local test: last BBS status shown
@@ -514,6 +516,10 @@ class MainWindow(QMainWindow):
                 Qt.ConnectionType.QueuedConnection)
             self.modem.version_report.connect(
                 self._on_version_report, Qt.ConnectionType.QueuedConnection)
+        # Aether HF refusing MYCALL or BW during setup
+        if hasattr(self.modem, "init_refused"):
+            self.modem.init_refused.connect(
+                self._on_init_refused, Qt.ConnectionType.QueuedConnection)
         # Local test mode: the BBS attaching and going
         if hasattr(self.modem, "bbs_status"):
             self.modem.bbs_status.connect(
@@ -639,6 +645,8 @@ class MainWindow(QMainWindow):
                 "through digipeaters.")
         self._connect_in_progress = True
         self._rf_session_up = False
+        self._call_started = time.time()   # what the modem says since then is this call's
+        self._abort_sent = False
         # The BBS's line ends are learned afresh for each call.  ;TRANSPORT?
         # is an Aether BBS extension: it goes out only once the BBS shows
         # CR LF line ends — a BPQ node (bare CR) would take it as a bad
@@ -729,7 +737,8 @@ class MainWindow(QMainWindow):
         self.modem.initialize_modem(
             callsign, self.config.is_hf_band, self.config.session_bandwidth,
             query_version=self.config.is_aether,
-            session=self.config.vara_session)
+            session=self.config.vara_session,
+            wait_replies=self.config.is_aether)
 
     @pyqtSlot(object)
     def _on_init_complete(self, new_state):
@@ -748,12 +757,22 @@ class MainWindow(QMainWindow):
         """Send the CONNECT command to initiate the RF link."""
         if self.modem.state != ConnectionState.MODEM_CONNECTED:
             return
+        if not self._connect_in_progress:
+            return              # the setup was refused, or the call given up
         target = self._target
         via = self._via
         callsign = self._effective_callsign()
 
         self.terminal.display.append_system(f"Initiating RF connection to {target}...")
         self.modem.rf_connect(callsign, target, *via)
+
+    @pyqtSlot(str)
+    def _on_init_refused(self, why: str):
+        """The modem refused a setup command (Aether HF): drop the call."""
+        self.terminal.display.append_error(f"[AETHER] {why}")
+        # No CONNECT goes out (_send_rf_connect checks this), and the
+        # MODEM_CONNECTED that follows closes the modem link
+        self._connect_in_progress = False
 
     @pyqtSlot(str)
     def _on_rf_connected(self, calls_str: str):
@@ -846,8 +865,22 @@ class MainWindow(QMainWindow):
         # DISCONNECTED (_on_rf_disconnected / _on_state_changed).
         if self.modem.state == ConnectionState.CONNECTED:
             self.terminal.display.append_system("Disconnecting...")
+            if self.config.is_aether:
+                self.terminal.display.append_system(
+                    "  Aether HF sends what is still queued (for a minute at most),\n"
+                    "  then its Morse ID. Press Disconnect again to abort now.")
             self.modem.rf_disconnect()
             # _on_rf_disconnected will handle the rest asynchronously
+        elif (self.config.is_aether and self.modem.state == ConnectionState.DISCONNECTING
+              and hasattr(self.modem, "rf_abort") and not self._abort_sent):
+            # Closing the link would not hurry Aether HF (a program that
+            # leaves has its session closed in order), and with "host
+            # program" keying nobody would key its last frames: ABORT, and
+            # stay for the DISCONNECTED.
+            self.terminal.display.append_warning(
+                "Aborting the session... (press Disconnect once more to close the modem link)")
+            self._abort_sent = True
+            self.modem.rf_abort()
         elif self.modem.state != ConnectionState.DISCONNECTED:
             self.modem.disconnect_from_modem()
 
@@ -1764,6 +1797,7 @@ class MainWindow(QMainWindow):
             return None
         try:
             proc = subprocess.Popen([exe_path], shell=False)
+            proc.modem_label = label
             self._modem_procs.append(proc)
             log.info(f"Launched {label}: {exe_path} (PID {proc.pid})")
             return proc
@@ -1780,6 +1814,9 @@ class MainWindow(QMainWindow):
         a simple ``proc.terminate()``.
         """
         for proc in self._modem_procs:
+            if getattr(proc, "modem_label", "") == "Aether HF":
+                self._close_aether_process(proc)
+                continue
             if proc.poll() is None:  # still running
                 try:
                     pid = proc.pid
@@ -1802,6 +1839,39 @@ class MainWindow(QMainWindow):
                 except Exception as e:
                     log.error(f"Error terminating modem PID {proc.pid}: {e}")
         self._modem_procs.clear()
+
+    AETHER_CLOSE_WAIT = 5.0     # seconds to wait for Aether HF to close itself
+
+    def _close_aether_process(self, proc):
+        """Ask the Aether HF window to close, as its own close button does.
+
+        Never forced: Aether HF's window stops its modem in order — a
+        session's last frames and the closing Morse ID first, then the
+        transmitter released — and a forced kill of the process tree cut
+        that short, which on CAT keying can leave the radio keyed.  If it
+        is still closing (or asking the operator about a session) after a
+        few seconds, it is left to finish.
+        """
+        if proc.poll() is not None:
+            return
+        pid = proc.pid
+        log.info(f"Asking Aether HF (PID {pid}) to close")
+        try:
+            if os.name == "nt":
+                # Without /F, taskkill posts WM_CLOSE to the window
+                subprocess.call(["taskkill", "/PID", str(pid)],
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL)
+            else:
+                proc.terminate()
+            proc.wait(timeout=self.AETHER_CLOSE_WAIT)
+        except subprocess.TimeoutExpired:
+            log.warning(f"Aether HF (PID {pid}) is still closing; leaving it to finish")
+            self.terminal.display.append_system(
+                "Aether HF is still closing (it ends a session and identifies "
+                "first); it closes by itself.")
+        except Exception as e:
+            log.error(f"Error closing Aether HF (PID {pid}): {e}")
 
     # ── Dialogs ────────────────────────────────────────────────────
 
@@ -1996,14 +2066,54 @@ class MainWindow(QMainWindow):
                 f"{' with ' + st.remote if st.remote else ''}) — "
                 "a session started from its own panel is not this program's to end.")
         stop = False
-        for problem in st.problems:
+        for problem in st.problems + self._aether_mismatches(st):
             self.terminal.display.append_error(f"[AETHER] {problem}")
             stop = True
         if stop:
             self.terminal.display.append_warning(
-                "[AETHER] Not connecting. Fix the above in Aether HF and try again.")
+                "[AETHER] Not connecting. Fix the above and try again.")
             self._connect_in_progress = False
-        return not stop
+            return False
+        warning = double_keying(st, self.config.needs_host_ptt)
+        if warning:
+            self.terminal.display.append_warning(f"[AETHER] {warning}")
+        if st.host_connected and not self._take_over_aether_host_port(st):
+            self.terminal.display.append_warning(
+                "[AETHER] Not connecting: the other program keeps Aether HF's host port.")
+            self._connect_in_progress = False
+            return False
+        return True
+
+    def _aether_is_local(self) -> bool:
+        host = str(self.config.get("aether_host", "127.0.0.1")).strip().lower()
+        return host in ("", "127.0.0.1", "localhost", "::1") or host.startswith("127.")
+
+    def _aether_mismatches(self, st: AetherStatus) -> list:
+        return setup_mismatches(st, self.config.cmd_port, self.config.needs_host_ptt,
+                                local=self._aether_is_local())
+
+    def _take_over_aether_host_port(self, st: AetherStatus) -> bool:
+        """Another program holds Aether HF's host port: ask before taking it.
+
+        Aether HF serves one program at a time and the newest connection
+        wins, so connecting would cut off Winlink Express, VarAC or an RMS
+        Trimode gateway without a word.
+        """
+        held = f" (as {', '.join(st.host_callsigns)})" if st.host_callsigns else ""
+        answer = QMessageBox.question(
+            self, "Aether HF is in use",
+            f"Another program is attached to Aether HF's host port{held} — "
+            "Winlink Express, VarAC, RMS Trimode or another copy of a terminal.\n\n"
+            "Aether HF serves one program at a time: connecting now cuts that "
+            "program off, and anything it was doing with the modem ends.\n\n"
+            "Connect anyway?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No)
+        if answer == QMessageBox.StandardButton.Yes:
+            self.terminal.display.append_warning(
+                "[AETHER] Taking Aether HF's host port from the program attached to it.")
+            return True
+        return False
 
     def _explain_aether_no_session(self):
         """The call ended without a session — say why, if the modem knows."""
@@ -2018,10 +2128,37 @@ class MainWindow(QMainWindow):
             for p in problems:
                 self.terminal.display.append_error(f"[AETHER] {p}")
             return
+        reason = self._aether_mismatch_for_call(st, target)
+        if reason:
+            self.terminal.display.append_error(f"[AETHER] {reason}")
+            return
         self.terminal.display.append_warning(
             f"[AETHER] No session with {target}. Aether HF talks only to other\n"
             "  Aether HF stations, on the same bandwidth and link protocol\n"
             "  version. Its log (Log tab) has the reason for every refused call.")
+
+    def _aether_mismatch_for_call(self, st: AetherStatus, target: str) -> str:
+        """Aether HF's own sentence for why this call could not connect.
+
+        ``status.bandwidth.mismatch`` names an answer in another link
+        protocol (``version``: one of the two stations must update) and an
+        unanswered call to a station heard lately under another SSID
+        (``suggest``).  Only one about this target, since this call began.
+        """
+        m = st.mismatch or {}
+        if m.get("what") not in ("version", "suggest") or not m.get("sentence"):
+            return ""
+        at = m.get("at_ms")
+        # Unix milliseconds.  The modem says a station's mismatch again only
+        # after a minute, so one from up to a minute before this call (a
+        # second try) still stands.
+        if not isinstance(at, (int, float)) or at / 1000.0 < self._call_started - 65:
+            return ""
+        def base(call):
+            return str(call or "").upper().split("-")[0]
+        if base(m.get("callsign")) != base(target):
+            return ""
+        return str(m["sentence"])
 
     @pyqtSlot(str)
     def _on_version_report(self, version: str):
@@ -2053,6 +2190,7 @@ class MainWindow(QMainWindow):
             ("Bandwidth", f"{st.bandwidth_hz} Hz" if st.bandwidth_hz else "?"),
             ("Rung", st.rung_name or (str(st.mode) if st.mode is not None else "—")),
             ("Host port", ("on" if st.host_enabled else "OFF")
+             + (f", port {st.host_port}" if st.host_enabled and st.host_port else "")
              + (", in use" if st.host_connected else "")),
             ("Keying", st.ptt or "?"),
             ("Rules", f"{st.regulatory_policy or '?'} — "
@@ -2062,9 +2200,13 @@ class MainWindow(QMainWindow):
         html = "<table>" + "".join(
             f"<tr><td><b>{k}</b>&nbsp;&nbsp;</td><td>{v}</td></tr>" for k, v in rows
         ) + "</table>"
-        if st.problems:
+        attention = st.problems + self._aether_mismatches(st)
+        warning = double_keying(st, self.config.needs_host_ptt)
+        if warning:
+            attention.append(warning)
+        if attention:
             html += "<p><b>Needs attention:</b><br>" + "<br>".join(
-                f"• {p}" for p in st.problems) + "</p>"
+                f"• {p}" for p in attention) + "</p>"
         QMessageBox.information(self, "Aether HF Status", html)
 
     def _open_aether_panel(self):
@@ -2176,7 +2318,7 @@ class MainWindow(QMainWindow):
         Connect did exactly that).
         """
         old = self.modem
-        for name in _MODEM_SIGNALS + ("bbs_status", "tnc_status"):
+        for name in _MODEM_SIGNALS + ("bbs_status", "tnc_status", "init_refused"):
             sig = getattr(old, name, None)
             if sig is not None:
                 try:

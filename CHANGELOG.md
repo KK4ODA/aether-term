@@ -5,6 +5,53 @@ Format: [version] — YYYY-MM-DD, then a bulleted list of changes.
 
 ---
 
+## [1.2.1] — 2026-11-21
+
+Reviewed against Aether HF `0.2.0-beta.168` (link protocol 13). See
+[docs/AETHER_HF.md](docs/AETHER_HF.md).
+
+### Fixed
+
+- **Aether HF is closed gently.** With *Start Aether HF with Aether Term*,
+  exiting or switching modes force-killed Aether HF's whole process tree,
+  modem included. A session lost its last frames and its Morse ID, and a
+  radio keyed over CAT could stay keyed. Aether Term now asks Aether HF's
+  window to close, as its own close button does, and never forces it.
+- **A refused bandwidth stops the call.** Aether HF changes bandwidth only
+  between sessions and answers `BW` with `WRONG` while busy. The call then
+  went out anyway, in the bandwidth Aether HF was running (a 2300 Hz call
+  on a 500 Hz frequency, for one). Aether Term now waits for Aether HF's
+  answer to `MYCALL` and `BW`, and sends no call if either is refused.
+- **Keying lines are never dropped while the modem link opens.** A
+  `PTT ON` that arrived during the opening `DISCONNECT` was swallowed, so a
+  modem keyed by this program (VARA HF, or Aether HF on host-program
+  keying) transmitted with the radio unkeyed.
+- **A second Disconnect aborts in Aether HF mode.** Aether HF sends what is
+  queued (a minute at most) and its Morse ID before `DISCONNECTED`. A second
+  press used to drop the modem link, which does not hurry Aether HF and,
+  with host-program keying, left its last frames unkeyed. It now sends
+  `ABORT`; a third press closes the link.
+
+### Added
+
+- **More pre-call checks in Aether HF mode.** The call is not sent when
+  Aether HF's host port is not the port Aether Term is set to (Aether HF's
+  Winlink-program finder can move it off 8300), or when Aether HF is set to
+  let the host program key the radio and Aether Term is not set to. A
+  warning says when both would key the radio.
+- **Another program on Aether HF's host port is asked about.** Aether HF
+  serves one program at a time, and the newest connection takes the port.
+  If Winlink Express, VarAC or RMS Trimode is attached, Aether Term asks
+  before taking the port from it.
+- **Aether HF's own reason for a failed call.** When the station called
+  runs another link-protocol version, or was heard lately under another
+  SSID, the terminal shows Aether HF's sentence (which station needs to
+  update, for one) instead of the generic "No session".
+- **Ready for Aether FM's status.** A modem whose control API says it runs
+  another air than HF is refused in Aether HF mode.
+
+---
+
 ## [1.2.0] — 2026-10-27
 
 ### Added

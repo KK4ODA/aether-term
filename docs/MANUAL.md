@@ -1,6 +1,6 @@
 # Aether Term User Manual
 
-For Aether Term 1.1.10. Aether Term was called *VARA Term* before 1.1.
+For Aether Term 1.2.1. Aether Term was called *VARA Term* before 1.1.
 
 This manual covers day-to-day use of the program. The [README](../README.md) is the short
 version. Aether HF has its own [integration notes](AETHER_HF.md), building the Windows installer
@@ -165,7 +165,7 @@ processes.
 |---|---|---|---|
 | VARA FM | Start VARA FM with Aether Term (and close on exit) | On | The path you set (default `C:\VARA FM\VARAFM.exe`), then `C:\VARA FM\VARA FM.exe`, `C:\Program Files\VARA FM\VARAFM.exe`, `C:\Program Files (x86)\VARA FM\VARAFM.exe` |
 | VARA HF | Start VARA HF with Aether Term (and close on exit) | On | The path you set (default `C:\VARA HF\VARA HF.exe`), then `C:\VARA\VARA.exe`, `C:\Program Files\VARA\VARA.exe`, `C:\Program Files (x86)\VARA\VARA.exe` |
-| Aether HF | Start Aether HF with Aether Term (and close on exit) | Off | The path you set, else `%LOCALAPPDATA%\Aether HF\aether-hf.exe`. Not started if Aether HF's control API already answers ("Aether HF is already running — not starting another"). |
+| Aether HF | Start Aether HF with Aether Term (and close on exit) | Off | The path you set, else `%LOCALAPPDATA%\Aether HF\aether-hf.exe`. Not started if Aether HF's control API already answers ("Aether HF is already running — not starting another"). Closed by asking its window to close, never forced: see [5.4](#54-aether-hf). |
 | Soundmodem | Auto-launch Soundmodem | Off | Only the **Exe Path** you set. There is no default location. |
 | KISS TNC | (none) | | No modem program is used. |
 | Local test | (none) | | No modem program is used. |
@@ -442,19 +442,65 @@ modem's status line. The call is not sent if:
 - the host interface is off,
 - no rules are chosen, or Aether HF's regulatory profile would not load,
 - the rules block transmitting at the current dial,
-- there is a keying fault or a sound card fault.
+- there is a keying fault or a sound card fault,
+- Aether HF's host port is not the **Command Port** Aether Term is set to (Aether HF's Winlink
+  program finder can move it off 8300). The message names the port to use. This is checked only
+  when **Host** is this computer,
+- Aether HF is set to let the host program key the radio (*host program* in its Setup step 2) and
+  **Aether HF keying is "host program"** is not ticked here, so nothing would key the radio.
 
-Each reason is printed in red, followed by "[AETHER] Not connecting. Fix the above in Aether HF
-and try again." If the control API cannot be reached at all, Aether Term warns and connects over
-the host port without the checks.
+Each reason is printed in red, followed by "[AETHER] Not connecting. Fix the above and try
+again." If the control API cannot be reached at all, Aether Term warns and connects over the host
+port without the checks.
+
+Two more things are checked before the call:
+
+- If both Aether HF and Aether Term would key the radio (the box is ticked but Aether HF keys
+  over CAT, a serial line, CM108, rigctld or FLRig), a yellow warning says so. The call still
+  goes out.
+- **Another program on Aether HF's host port.** Aether HF serves one program at a time, and the
+  newest connection takes the port. If Winlink Express, VarAC, RMS Trimode or another terminal is
+  attached, Aether Term asks before connecting. **No** (the default) leaves the other program
+  alone. **Yes** takes the port, and the other program loses its connection to the modem.
+
+**Setting up the call.** Aether HF answers every command. Aether Term waits for its answer to
+`MYCALL` and to the bandwidth (`BW2300` or `BW500`). If Aether HF refuses either, no call goes
+out:
+
+- "The modem refused the callsign ...": Aether HF takes letters, digits, `-` and `/`, nine
+  characters at most.
+- "The modem could not move to ... Hz now": a session, call or transmission was under way in
+  Aether HF. It changes bandwidth only between sessions, and a call sent anyway would have gone
+  out in the other bandwidth. Try again when it is idle.
+
+**Disconnecting.** Aether HF closes a session in order. It first sends what is still queued (for
+a minute at most), then its Morse identifier (always, for a US callsign), and only then reports
+`DISCONNECTED`. The terminal says so. Press **Disconnect** again to abort the session at once
+(Aether HF's `ABORT`). A third press closes the link to the modem. With *host program* keying,
+wait for `*** DISCONNECTED ***` before closing Aether Term: until then Aether HF still needs this
+program to key the radio for its last frames and identifier.
 
 **After connecting to the port**, Aether Term checks the modem's `VERSION` answer. If it is not
 Aether HF (for example VARA HF left running on port 8300), it warns: "The modem on this port
 reports ..., not Aether HF."
 
 **A call that ends with no session**: Aether Term asks the modem why. If the modem reports a
-problem, it is printed; otherwise the terminal reminds you that Aether HF talks only to other
-Aether HF stations, and that Aether HF's Log tab has the reason for every refused call.
+problem, it is printed. If the station you called answered in another link-protocol version, or
+did not answer while the same operator was heard lately under another SSID, Aether HF's own
+sentence is printed (for example, which of the two stations needs to update). Otherwise the
+terminal reminds you that Aether HF talks only to other Aether HF stations, and that Aether HF's
+Log tab has the reason for every refused call.
+
+**Closing Aether HF.** With **Start Aether HF with Aether Term** ticked, Aether Term asks Aether
+HF's window to close when you exit or switch modes, the same as its own close button. It never
+forces it closed. Aether HF finishes a session's last frames and its Morse identifier and releases
+the transmitter before it stops, and it may ask you first if a session is under way. If it is still
+closing after 5 seconds, the terminal says "Aether HF is still closing" and leaves it to finish.
+
+**Aether HF's KISS port.** Aether Term's KISS TNC mode is for a radio's own TNC or Direwolf. Aether
+HF also has a KISS port (8100), but it sends each frame as an Aether datagram at a very slow rung,
+and while any program holds the host port without `CHAT ON` it drops KISS frames. Use the Aether
+HF mode for Aether HF.
 
 ### 5.5 Soundmodem (AGWPE)
 
@@ -941,11 +987,17 @@ or the modem ends it, or the modem link is lost. When the BBS ends the session, 
 | `[PTT] PTT watchdog: forced release after timeout` | The radio was keyed 90 s with no `PTT OFF`. Check the modem. |
 | `OmniRig not running — start OmniRig for HF PTT control` (at startup) | OmniRig is the PTT method (the default) but is not running. Ignore it if you do not use VARA HF. |
 | `pywin32 not installed — OmniRig PTT unavailable` (at startup) | Source install without pywin32: `pip install pywin32`. |
-| `[AETHER] <problem>` then `Not connecting. Fix the above in Aether HF and try again.` | The Aether HF preflight found a problem. See [5.4](#54-aether-hf). |
+| `[AETHER] <problem>` then `Not connecting. Fix the above and try again.` | The Aether HF preflight found a problem. See [5.4](#54-aether-hf). |
+| `[AETHER] Aether HF's host port is <port>, but Aether Term is set to <port>.` | Set **Command Port** to the port named, in **Settings → Modem Configuration → Aether HF Modem**. |
+| `[AETHER] Aether HF is set to let the host program key the radio ...` | Tick **Aether HF keying is "host program"**, or set Aether HF's Setup step 2 to key the radio itself. |
+| `[AETHER] Not connecting: the other program keeps Aether HF's host port.` | You answered **No** when asked about another program on the host port. Close that program first, or answer **Yes**. |
+| `[AETHER] The modem could not move to <n> Hz now ...` | Aether HF refused the bandwidth because it was busy. Try again when it is idle. |
+| `[AETHER] The modem refused the callsign ...` | Check **My Callsign**: letters, digits, `-` and `/`, nine characters at most. |
+| `Aether HF is still closing ...` | Aether HF is ending a session or asking you about one. It closes by itself. |
 | `[AETHER] Control API not reachable at http://...:8515 — connecting over the host port without status checks.` | Aether HF's control API did not answer. The call still goes out. |
 | `[AETHER] The modem is busy (...)` | A session started from Aether HF's own panel is in progress. |
 | `[AETHER] The modem on this port reports "...", not Aether HF.` | Another modem (often VARA HF) holds port 8300. Close it or change the port. |
-| `[AETHER] No session with <target>. ...` | The call ended without a session. Check that the other station runs Aether HF on the same bandwidth; Aether HF's Log tab has the reason. |
+| `[AETHER] No session with <target>. ...` | The call ended without a session. Check that the other station runs Aether HF on the same bandwidth; Aether HF's Log tab has the reason. When Aether HF knows the reason (another link-protocol version, a station heard under another SSID), its own sentence is shown instead. |
 | `Aether HF not found.` | Install Aether HF or set its path in **Settings → Modem Configuration**. |
 | `<mode> modem not found.` / `<mode> executable not found: <path>` | Auto-launch is on but the program is not at the path. Set the path or turn auto-launch off. |
 | `Digipeaters are supported with VARA FM, Soundmodem and a KISS TNC.` | Set Via 1 and Via 2 to None for this mode. |
