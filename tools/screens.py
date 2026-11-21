@@ -66,6 +66,8 @@ def _ports():
         for p in (8500, 8501):
             s = socket.socket()
             socks.append(s)
+            if os.name != "nt":      # as the modem binds: a port in TIME_WAIT is free
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             s.bind(("127.0.0.1", p))
         return [8500, 8501]
     except OSError:
