@@ -830,3 +830,154 @@ def test_auto_login_off_says_so_and_shows_the_prompt(qapp, win):
     assert "Automatic login is off" in text(win)
     assert "No saved password" not in text(win)
     assert "Enter password" in text(win)
+
+
+# ── Aether HF as it stands (host port, keying, BW, mismatches, closing) ──
+
+def test_preflight_stops_on_another_host_port(qapp, win):
+    """Aether HF's finder can move its host port off 8300; say which it is."""
+    win.fake.state["host_port"] = win.fake.cmd_port + 10
+    win._on_connect()
+    assert pump(qapp, until=lambda: "Not connecting" in text(win)), text(win)[-600:]
+    assert f"host port is {win.fake.cmd_port + 10}" in text(win)
+    assert win.fake.commands == []
+
+
+def test_preflight_stops_when_nothing_would_key_the_radio(qapp, win):
+    win.fake.state["ptt_kind"] = "host"
+    win._on_connect()
+    assert pump(qapp, until=lambda: "Not connecting" in text(win)), text(win)[-600:]
+    assert "nothing would key the radio" in text(win)
+    assert win.fake.commands == []
+
+
+@pytest.mark.parametrize("answer,connects", [("No", False), ("Yes", True)])
+def test_another_program_on_the_host_port_is_asked_about(qapp, win, monkeypatch,
+                                                         answer, connects):
+    """Aether HF serves one program: taking its port cuts the other one off."""
+    from PyQt6.QtWidgets import QMessageBox
+    asked = []
+
+    def question(*args, **kwargs):
+        asked.append(args[2])
+        return getattr(QMessageBox.StandardButton, answer)
+
+    monkeypatch.setattr(QMessageBox, "question", question)
+    win.fake.state["other_host"] = ["W1ABC"]
+    win._on_connect()
+    if connects:
+        assert pump(qapp, until=lambda: "CONNECTED to W1AW-5" in text(win), timeout=15)
+    else:
+        assert pump(qapp, until=lambda: "Not connecting" in text(win)), text(win)[-600:]
+        assert win.fake.commands == []
+        assert win.connect_btn.isEnabled()
+    assert asked and "as W1ABC" in asked[0]
+
+
+def test_refused_bandwidth_stops_the_call(qapp, win):
+    """A BW refused (Aether HF busy) would send the call in the wrong bandwidth."""
+    from vara.connection import ConnectionState
+    win.fake.state["refuse_bw"] = True
+    win._on_connect()
+    assert pump(qapp, until=lambda: "could not move to 2300 Hz" in text(win), timeout=15)
+    assert pump(qapp, until=lambda: win.modem.state == ConnectionState.DISCONNECTED)
+    pump(qapp, 0.8)
+    assert not any(c.startswith("CONNECT ") for c in win.fake.commands)
+    assert win.connect_btn.isEnabled()
+
+
+def test_refused_callsign_stops_the_call(qapp, win):
+    from vara.connection import ConnectionState
+    win.fake.state["refuse_mycall"] = True
+    win._on_connect()
+    assert pump(qapp, until=lambda: "refused the callsign KK4ODA" in text(win), timeout=15)
+    assert pump(qapp, until=lambda: win.modem.state == ConnectionState.DISCONNECTED)
+    pump(qapp, 0.8)
+    assert not any(c.startswith("CONNECT ") for c in win.fake.commands)
+
+
+def test_link_protocol_mismatch_is_explained(qapp, win):
+    """The modem's own sentence beats the generic "no session" text."""
+    sentence = ("W1AW-5 answered in link protocol 12 and this station speaks 13: "
+                "W1AW-5 needs to update.")
+    win.fake.state["answer_connect"] = False
+    win.fake.state["mismatch"] = {
+        "callsign": "W1AW-5", "what": "version", "at_ms": int(time.time() * 1000) + 500,
+        "theirs_protocol": 12, "ours_protocol": 13, "sentence": sentence}
+    win._on_connect()
+    assert pump(qapp, until=lambda: sentence in text(win), timeout=15), text(win)[-600:]
+    assert "No session with W1AW-5" not in text(win)
+
+
+def test_an_old_or_unrelated_mismatch_is_not_blamed(qapp, win):
+    win.fake.state["answer_connect"] = False
+    win.fake.state["mismatch"] = {
+        "callsign": "N0XYZ", "what": "version", "at_ms": int(time.time() * 1000),
+        "sentence": "N0XYZ needs to update."}
+    win._on_connect()
+    assert pump(qapp, until=lambda: "No session with W1AW-5" in text(win), timeout=15)
+    assert "N0XYZ" not in text(win)
+
+
+def test_second_disconnect_aborts(qapp, win):
+    """Aether HF drains its queue for up to a minute; Disconnect again aborts."""
+    from vara.connection import ConnectionState
+    win.fake.state["slow_disconnect"] = True
+    win._on_connect()
+    assert pump(qapp, until=lambda: "CONNECTED to W1AW-5" in text(win), timeout=15)
+    win._on_disconnect()
+    assert pump(qapp, until=lambda: "Disconnect again to abort" in text(win))
+    pump(qapp, 0.3)
+    assert win.modem.state == ConnectionState.DISCONNECTING
+    win._on_disconnect()
+    assert pump(qapp, until=lambda: "ABORT" in win.fake.commands)
+    assert pump(qapp, until=lambda: "*** DISCONNECTED ***" in text(win))
+    assert pump(qapp, until=lambda: win.modem.state == ConnectionState.DISCONNECTED)
+
+
+class _FakeProc:
+    """A launched modem process that takes its time closing."""
+
+    def __init__(self, label, closes=False):
+        self.modem_label, self.pid, self.closes = label, 4321, closes
+        self.calls = []
+
+    def poll(self):
+        return 0 if "closed" in self.calls else None
+
+    def terminate(self):
+        self.calls.append("terminate")
+
+    def kill(self):
+        self.calls.append("kill")
+
+    def wait(self, timeout=None):
+        import subprocess
+        if self.closes:
+            self.calls.append("closed")
+            return 0
+        raise subprocess.TimeoutExpired("aether-hf.exe", timeout)
+
+
+@pytest.mark.parametrize("os_name", ["nt", "posix"])
+def test_aether_hf_is_asked_to_close_never_killed(qapp, win, monkeypatch, os_name):
+    """Force-killing Aether HF cut its last frames and Morse ID, and could
+    leave a CAT-keyed radio keyed; its window is asked to close instead."""
+    import subprocess
+    from gui import main_window
+    ran = []
+    monkeypatch.setattr(main_window.os, "name", os_name)
+    monkeypatch.setattr(main_window.subprocess, "call",
+                        lambda args, **kw: ran.append(args) or 0)
+    monkeypatch.setattr(main_window.MainWindow, "AETHER_CLOSE_WAIT", 0.05)
+    proc = _FakeProc("Aether HF")
+    win._modem_procs = [proc]
+    win._terminate_modem_processes()
+    assert "kill" not in proc.calls
+    assert all("/F" not in args for args in ran)
+    if os_name == "nt":
+        assert ran == [["taskkill", "/PID", "4321"]]
+    else:
+        assert proc.calls == ["terminate"]
+    assert "Aether HF is still closing" in text(win)
+    assert win._modem_procs == []

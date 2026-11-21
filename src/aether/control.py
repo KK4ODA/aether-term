@@ -12,8 +12,9 @@ Aether Term talks to Aether HF through two interfaces:
 
 Spec: https://github.com/KK4ODA/aether-hf/blob/master/docs/spec/control-api.md
 
-Only read-only methods are used (``status``, ``capabilities``).  A loopback
-connection needs no token; nothing here changes the modem's settings.
+Only read-only methods are used (``status``, ``capabilities``, and
+``config.get`` to learn who keys the radio).  A loopback connection needs no
+token; nothing here changes the modem's settings.
 """
 
 import json
@@ -91,7 +92,22 @@ class AetherStatus:
     regulatory_policy: str = ""      # rules / none / unset / broken
     regulatory_verdict: str = ""     # legal / warning / blocked
     regulatory_summary: str = ""
+    host_port: Optional[int] = None  # the port the host interface listens on
+    host_callsigns: List[str] = field(default_factory=list)  # held by the attached program
+    air: str = ""                    # "hf" or "fm" (Aether FM, later); "" = not said
+    mismatch: Dict[str, Any] = field(default_factory=dict)   # status.bandwidth.mismatch
+    ptt_kind: str = ""               # [ptt] kind from config.get: host, cat, … ("" unknown)
     raw: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def host_keyed(self) -> Optional[bool]:
+        """Whether Aether HF leaves keying to the host program (None = unknown)."""
+        if self.ptt_kind:
+            return self.ptt_kind == "host"
+        if self.ptt:
+            # The daemon's own description of host keying (ptt.rs, HostKeyed)
+            return self.ptt.lower().startswith("the host program")
+        return None
 
     @property
     def problems(self) -> List[str]:
@@ -99,6 +115,10 @@ class AetherStatus:
         out = []
         if not self.reachable:
             return out
+        if self.air and self.air != "hf":
+            out.append(
+                f"This Aether modem runs the \"{self.air}\" air, not HF. "
+                "Aether Term's Aether HF mode needs Aether HF.")
         if not self.host_enabled:
             out.append(
                 "The VARA-compatible host interface is off. In Aether HF, "
@@ -147,6 +167,15 @@ class AetherStatus:
         rung_name = ""
         if isinstance(mode, int) and rung_names:
             rung_name = rung_names.get(mode, "")
+        host_port = None
+        address = str(host.get("command_address") or "")
+        if address.rpartition(":")[2].isdigit():
+            host_port = int(address.rpartition(":")[2])     # "127.0.0.1:8300", "[::1]:8300"
+        host_calls: List[str] = []
+        for claim in st.get("claims") or []:
+            if isinstance(claim, dict) and claim.get("kind") == "host":
+                host_calls += [str(c) for c in claim.get("callsigns") or []]
+        mismatch = bw.get("mismatch")
         return cls(
             reachable=True,
             version=str(st.get("version") or ""),
@@ -167,8 +196,52 @@ class AetherStatus:
             regulatory_policy=str(reg.get("policy") or ""),
             regulatory_verdict=str(indicator.get("verdict") or ""),
             regulatory_summary=str(indicator.get("summary") or ""),
+            host_port=host_port,
+            host_callsigns=host_calls,
+            air=str(st.get("air") or "").lower(),
+            mismatch=mismatch if isinstance(mismatch, dict) else {},
             raw=st,
         )
+
+
+def setup_mismatches(st: AetherStatus, cmd_port: int, host_ptt: bool,
+                     local: bool = True) -> List[str]:
+    """Where Aether Term's settings disagree with the modem's, so a call
+    would fail (or go out with nothing keying the radio).
+
+    *cmd_port* and *host_ptt* are Aether Term's command port and its
+    "Aether HF keying is host program" box; *local* is whether the modem is
+    reached on this computer, where its own host address can be compared.
+    """
+    out = []
+    if not st.reachable:
+        return out
+    if local and st.host_enabled and st.host_port and st.host_port != cmd_port:
+        # Aether HF's Winlink-program finder sets the port a program
+        # already used, so it is not always 8300
+        out.append(
+            f"Aether HF's host port is {st.host_port}, but Aether Term is set "
+            f"to {cmd_port}. Set Command Port to {st.host_port} in Settings → "
+            "Modem Configuration → Aether HF.")
+    if st.host_keyed and not host_ptt:
+        out.append(
+            "Aether HF is set to let the host program key the radio (its "
+            "Setup step 2: host program), but Aether Term is not set to key "
+            "it, so nothing would key the radio. Tick \"Aether HF keying is "
+            "host program\" in Settings → Modem Configuration, or let Aether "
+            "HF key the radio itself.")
+    return out
+
+
+def double_keying(st: AetherStatus, host_ptt: bool) -> str:
+    """A warning when both Aether HF and Aether Term would key the radio."""
+    if host_ptt and st.host_keyed is False and st.ptt_kind not in ("", "none"):
+        return (f"Aether HF keys the radio itself ({st.ptt or st.ptt_kind}), and "
+                "Aether Term is also set to key it on PTT ON. Only one program "
+                "should key the radio: untick \"Aether HF keying is host "
+                "program\" in Settings unless Aether HF's Setup step 2 says "
+                "host program.")
+    return ""
 
 
 # ── Client ─────────────────────────────────────────────────────────
@@ -215,11 +288,27 @@ class AetherControl:
                 names[idx] = str(m.get("name", ""))
         return names
 
-    def snapshot(self, rung_names: Optional[Dict[int, str]] = None) -> AetherStatus:
+    def ptt_kind(self) -> str:
+        """``[ptt] kind`` from ``config.get`` (read-only): "host", "cat", …
+
+        "" when the modem will not say (a daemon run without a configuration
+        file answers ``unsupported``).
+        """
         try:
-            return AetherStatus.from_status(self.status(), rung_names)
+            cfg = (self.call("config.get") or {}).get("config") or {}
+        except AetherControlError:
+            return ""
+        return str((cfg.get("ptt") or {}).get("kind") or "").lower()
+
+    def snapshot(self, rung_names: Optional[Dict[int, str]] = None,
+                 with_keying: bool = False) -> AetherStatus:
+        try:
+            st = AetherStatus.from_status(self.status(), rung_names)
         except AetherControlError as e:
             return AetherStatus(reachable=False, error=str(e))
+        if with_keying:
+            st.ptt_kind = self.ptt_kind()
+        return st
 
 
 class AetherQuery(QObject):
@@ -228,6 +317,7 @@ class AetherQuery(QObject):
     ``snapshot(url, callback)`` asks the modem on a worker thread and calls
     ``callback(AetherStatus)`` back on the thread this object lives in (the
     GUI thread), so a slow or unreachable modem never freezes the window.
+    The one-shot snapshot also reads who keys the radio (``config.get``).
     """
 
     _done = pyqtSignal(int, object)
@@ -244,7 +334,7 @@ class AetherQuery(QObject):
         self._callbacks[token] = callback
 
         def work():
-            self._done.emit(token, AetherControl(base_url).snapshot())
+            self._done.emit(token, AetherControl(base_url).snapshot(with_keying=True))
 
         threading.Thread(target=work, daemon=True, name="AetherQuery").start()
 

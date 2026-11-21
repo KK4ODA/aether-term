@@ -356,7 +356,7 @@ class SettingsDialog(QDialog):
         self.aether_host_ptt = QCheckBox("Aether HF keying is \"host program\" — key the radio here")
         self.aether_host_ptt.setToolTip(
             "Leave off when Aether HF keys the radio itself (CAT, serial,\n"
-            "CM108 or rigctld) — the usual setup, with its rules check on.\n"
+            "CM108, rigctld or FLRig) — the usual setup, with its rules check on.\n"
             "Turn on only if Aether HF Setup step 2 is set to \"host program\";\n"
             "Aether Term then keys the radio on PTT ON with the PTT method below.")
         ae_form.addRow(self.aether_host_ptt)
@@ -596,9 +596,18 @@ class SettingsDialog(QDialog):
                 f"Not reachable at {url}. Is Aether HF running?\n"
                 f"Download: {AETHER_RELEASES_URL}")
             return
+        from aether.control import setup_mismatches, double_keying
         lines = [f"Aether HF {snap.version} — {snap.bandwidth_hz or '?'} Hz, "
                  f"state {snap.state or '?'}, callsign {snap.callsign or '(none)'}"]
-        problems = snap.problems
+        # Checked against what this dialog says now, before it is saved
+        host = self.aether_host.text().strip().lower() or "127.0.0.1"
+        local = host in ("localhost", "::1") or host.startswith("127.")
+        host_ptt = self.aether_host_ptt.isChecked()
+        problems = snap.problems + setup_mismatches(
+            snap, self.aether_cmd_port.value(), host_ptt, local=local)
+        warning = double_keying(snap, host_ptt)
+        if warning:
+            problems.append(warning)
         if problems:
             lines += [f"• {p}" for p in problems]
         else:

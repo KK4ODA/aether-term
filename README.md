@@ -99,19 +99,22 @@ software, not the signal. The BBS you call must be running Aether HF too, on the
 2. In **Aether HF**:
    - Setup step 1: choose the rules your station runs under (nothing is transmitted until you do).
    - Setup step 2: how the radio is keyed. The usual choice is to let **Aether HF own the radio**
-     (CAT, serial, CM108 or `rigctld`), which keeps its regulatory check on every transmission.
-   - Setup step 5: turn on **Host programs** (port 8300). It is off by default.
+     (CAT, serial, CM108, `rigctld` or FLRig), which keeps its regulatory check on every
+     transmission.
+   - Setup step 5: turn on **Host programs** (port 8300). It is off by default. Aether HF serves
+     one host program at a time, so Aether Term takes the port from Winlink Express or VarAC
+     while it is connected (it asks first).
 3. In **Aether Term**, select **Aether HF** in the toolbar, or in
    **Settings → Terminal Setup → Modem**. Under **Settings → Modem Configuration → Aether HF Modem**:
 
    | Setting | Default | Notes |
    |---|---|---|
    | Host | `127.0.0.1` | Where Aether HF runs |
-   | Command Port | `8300` | Data port is always command + 1 |
+   | Command Port | `8300` | Data port is always command + 1. Must match Aether HF's host port (Aether Term checks) |
    | Control API Port | `8515` | Read-only status; no token needed on loopback |
    | Bandwidth | `2300` | `BW2300` / `BW500` — both stations must match |
-   | Keying is "host program" | off | Turn on only if Aether HF Setup step 2 is *host program*; Aether Term then keys the radio with the PTT method below (OmniRig, Hamlib or FLrig) |
-   | Start Aether HF with Aether Term | off | Launches `aether-hf.exe`, unless Aether HF is already running |
+   | Keying is "host program" | off | Turn on only if Aether HF Setup step 2 is *host program*; Aether Term then keys the radio with the PTT method below (OmniRig, Hamlib or FLrig). Aether Term checks that this matches Aether HF |
+   | Start Aether HF with Aether Term | off | Launches `aether-hf.exe`, unless Aether HF is already running. On exit its window is asked to close, never forced, so a session ends with its last frames and Morse ID |
 
    **Test Aether HF** in that panel asks the modem for its status and lists anything that needs
    attention.
@@ -120,11 +123,18 @@ software, not the signal. The BBS you call must be running Aether HF too, on the
 
 - **Status bar** — `Aether <version> · <bandwidth> · <state> · <rung>`, green when ready, red when
   something blocks transmitting. Click it for the full status.
-- **On Connect** — the modem's status is checked first. If the host port is off, no rules are
-  chosen, or the modem cannot key the radio, Aether Term says so and does not send the call.
+- **On Connect** — the modem's status is checked first. If the host port is off or on another
+  port, no rules are chosen, the modem cannot key the radio, or nothing would key it (Aether HF
+  set to *host program* keying without the box ticked here), Aether Term says so and does not
+  send the call. If another program holds Aether HF's host port, it asks before taking it.
+- **Setting up the call** — if Aether HF refuses the callsign or the bandwidth (it changes
+  bandwidth only between sessions), the call is not sent.
 - **After connecting** — the modem's `VERSION` is checked (a VARA modem left on port 8300 is
   caught), and `CONNECTED`/`BITRATE` fill in the session bandwidth and link speed.
-- **A call that ends with no session** — Aether Term asks the modem why and explains it.
+- **A call that ends with no session** — Aether Term asks the modem why and explains it,
+  including Aether HF's own sentence when the other station runs another link-protocol version.
+- **Disconnect** — Aether HF sends what is queued (a minute at most) and its Morse ID before
+  `DISCONNECTED`. Press Disconnect again to abort.
 - **Aether HF menu** — modem status, open the station panel in a browser, the host-program
   setup guide, and the download page.
 

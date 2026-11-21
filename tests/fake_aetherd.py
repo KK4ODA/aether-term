@@ -7,7 +7,8 @@ Serves the two interfaces Aether Term uses, with the shapes aetherd uses
 * the VARA-compatible host port — command port + data port (= command + 1),
   CR-terminated lines, ``BUFFER 0`` on attach, ``VERSION Aether HF <v>``,
   and ``CONNECT`` answered with ``CONNECTED <caller> <called> <bw>``;
-* the control API — ``POST /v1/status`` and ``/v1/capabilities``.
+* the control API — ``POST /v1/status``, ``/v1/capabilities`` and
+  ``/v1/config.get``.
 
 Behaviour is steered through the ``state`` dict.
 """
@@ -62,6 +63,15 @@ class FakeAetherd:
             "prompt": False,             # Aether BBS: follow the welcome with "> "
             # The BBS's answer to ;TRANSPORT?, sent in these pieces
             "transport_reply": [b";TRANSPORT AETHER_HF\r\n", b"\r\n> "],
+            "refuse_bw": False,          # answer BW<n> with WRONG (station busy)
+            "refuse_mycall": False,      # answer MYCALL with WRONG (bad callsign)
+            "ptt_kind": "cat",           # [ptt] kind: "host" = the program keys
+            "host_port": None,           # the host port status reports (None = ours)
+            "other_host": None,          # callsigns of another program attached
+            "mismatch": None,            # status.bandwidth.mismatch
+            "air": None,                 # status.air (Aether FM, later)
+            "config_get": True,          # False: config.get answers "unsupported"
+            "slow_disconnect": False,    # DISCONNECT: no DISCONNECTED until ABORT
         }
         self.commands: list[str] = []
         self.raw_commands = bytearray()   # exactly what arrived, terminators and all
@@ -113,18 +123,32 @@ class FakeAetherd:
 
     def status(self) -> dict:
         st = self.state
-        return {
+        claims = []
+        if st["other_host"]:
+            claims.append({"id": 9, "app": None, "kind": "host",
+                           "callsigns": st["other_host"], "listening": True})
+        host_port = st["host_port"] or self.cmd_port
+        out = {
             "state": st["state"], "role": "none", "callsign": "KK4ODA",
             "remote": st["remote"], "mode": 7, "version": VERSION,
             "transmitting": False, "channel_busy": False, "ptt": "CAT on COM3",
             "ptt_fault": st["ptt_fault"], "audio_fault": st["audio_fault"],
-            "answering": True,
-            "host": {"enabled": st["host_enabled"], "connected": bool(self._conns)},
-            "bandwidth": {"bandwidth_hz": 2300, "home_hz": 2300, "host_hz": None},
+            "answering": True, "claims": claims,
+            "host": {"enabled": st["host_enabled"],
+                     "command_address": f"127.0.0.1:{host_port}",
+                     "data_address": f"127.0.0.1:{host_port + 1}",
+                     "connected": bool(self._conns) or bool(st["other_host"])},
+            "bandwidth": {"bandwidth_hz": 2300, "home_hz": 2300, "host_hz": None,
+                          "mismatch": st["mismatch"]},
             "regulatory": {"policy": st["policy"],
                            "indicator": {"verdict": st["verdict"],
                                          "summary": f"FCC: {st['verdict']} at 7.103 MHz"}},
         }
+        if st["ptt_kind"] == "host":
+            out["ptt"] = "the host program (it keys the radio on PTT ON)"
+        if st["air"]:
+            out["air"] = st["air"]
+        return out
 
     def _handler(self):
         fake = self
@@ -145,6 +169,14 @@ class FakeAetherd:
                 if method == "status":
                     time.sleep(fake.state["status_delay"])
                     body = {"ok": True, "result": fake.status()}
+                elif method == "config.get" and fake.state["config_get"]:
+                    body = {"ok": True, "result": {
+                        "config": {"ptt": {"kind": fake.state["ptt_kind"]},
+                                   "host": {"enabled": fake.state["host_enabled"]}},
+                        "path": "station.toml", "live_keys": []}}
+                elif method == "config.get":
+                    body = {"ok": False, "error": {"code": "unsupported",
+                                                   "message": "no configuration file"}}
                 elif method == "capabilities":
                     body = {"ok": True, "result": {
                         "bandwidth_hz": 2300,
@@ -223,7 +255,21 @@ class FakeAetherd:
 
     def _answer(self, line: str, c: socket.socket, d: socket.socket):
         up = line.upper()
-        if up == "VERSION":
+        if up.startswith("BW") and self.state["refuse_bw"]:
+            c.sendall(b"WRONG\r")
+        elif up.startswith("MYCALL") and self.state["refuse_mycall"]:
+            c.sendall(b"WRONG\r")
+        elif up == "ABORT":
+            c.sendall(b"OK\r")
+            if self.state["state"] in ("connected", "disconnecting"):
+                self.state.update(state="idle", remote=None)
+                c.sendall(b"DISCONNECTED\r")
+        elif up == "DISCONNECT" and self.state.get("slow_disconnect"):
+            # Aether HF finishing what is queued: DISCONNECTED comes later
+            c.sendall(b"OK\r")
+            if self.state["state"] == "connected":
+                self.state["state"] = "disconnecting"
+        elif up == "VERSION":
             c.sendall(self.state["version_reply"].encode() + b"\r")
         elif up.startswith("CONNECT ") and self.state["reject_connect"]:
             c.sendall(b"WRONG\r")

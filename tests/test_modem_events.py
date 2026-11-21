@@ -120,7 +120,7 @@ def test_busy_on_off_is_not_remote_busy(modem):
     assert modem.got["busy_signal"] == [()]
 
 
-@pytest.mark.parametrize("line", ["OK", "WRONG", "DISCONNECTED", "PTT OFF"])
+@pytest.mark.parametrize("line", ["OK", "WRONG", "DISCONNECTED"])
 def test_init_cleanup_absorbs_replies(modem, line):
     import threading
     modem._init_cleanup = True
@@ -129,6 +129,47 @@ def test_init_cleanup_absorbs_replies(modem, line):
     assert modem._init_ack.is_set()
     assert "command_event" not in modem.got
     assert "rf_disconnected" not in modem.got
+
+
+def test_init_cleanup_never_swallows_keying(modem):
+    """A modem keyed by this program needs every PTT line, cleanup or not.
+
+    PTT ON is passed on (and does not end the wait); PTT OFF is passed on
+    and ends it, as VARA may answer the cleanup DISCONNECT with nothing else.
+    """
+    import threading
+    modem._init_cleanup = True
+    modem._init_ack = threading.Event()
+    modem._handle_event("PTT ON")
+    assert not modem._init_ack.is_set()
+    modem._handle_event("PTT OFF")
+    assert modem._init_ack.is_set()
+    assert modem.got["ptt_event"] == [(True,), (False,)]
+
+
+def test_a_waited_command_takes_its_answer(modem):
+    import threading
+    modem._reply_wait = threading.Event()
+    modem._handle_event("WRONG")
+    assert modem._reply == "WRONG" and modem._reply_wait.is_set()
+
+
+def test_aether_setup_stops_on_a_refused_bandwidth(qapp, aetherd):
+    """Aether HF answers BW with WRONG while busy; the call must not go out."""
+    from conftest import pump
+    from vara.modem import VARAModem
+    aetherd.state["refuse_bw"] = True
+    m = VARAModem()
+    refused, states = [], []
+    m.init_refused.connect(refused.append)
+    m.state_changed.connect(states.append)
+    m.connect_to_modem("127.0.0.1", aetherd.cmd_port, aetherd.data_port)
+    assert pump(qapp, until=lambda: ConnectionState.MODEM_CONNECTED in states, timeout=10)
+    m.initialize_modem("KK4ODA", True, 500, query_version=True, wait_replies=True)
+    assert pump(qapp, until=lambda: refused, timeout=15)
+    assert "500 Hz" in refused[0]
+    assert "BW500" in aetherd.commands and "VERSION" not in aetherd.commands
+    m.disconnect_from_modem()
 
 
 @pytest.mark.parametrize("line", ["BUFFER 0", "IAMALIVE", "ENCRYPTION DISABLED",

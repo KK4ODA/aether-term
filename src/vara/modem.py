@@ -69,6 +69,7 @@ class VARAModem(QObject):
         bitrate_report(str)         — link speed, from BITRATE (<mode>) <bps> BPS
         session_bandwidth(str)      — bandwidth reported with CONNECTED (Aether HF)
         version_report(str)         — the modem's answer to VERSION
+        init_refused(str)           — Aether HF refused MYCALL or BW: no CONNECT follows
     """
 
     state_changed = pyqtSignal(object)        # ConnectionState
@@ -85,6 +86,9 @@ class VARAModem(QObject):
     bitrate_report = pyqtSignal(str)           # e.g. "1234 bps (mode 9)"
     session_bandwidth = pyqtSignal(str)        # e.g. "2300"
     version_report = pyqtSignal(str)           # e.g. "Aether HF 0.2.0-beta.102"
+    init_refused = pyqtSignal(str)             # a setup command answered WRONG (Aether HF)
+
+    REPLY_TIMEOUT = 5.0    # seconds to wait for OK/WRONG when replies are awaited
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -96,6 +100,8 @@ class VARAModem(QObject):
         self._init_cleanup = False       # True while sending cleanup DISCONNECT
         self._init_ack: Optional[threading.Event] = None  # set when VARA acks cleanup
         self._last_cmd: Optional[str] = None  # most recent command sent (for WRONG correlation)
+        self._reply_wait: Optional[threading.Event] = None  # set by the next OK / WRONG
+        self._reply: Optional[str] = None
         self.connected_via: List[str] = []  # digipeaters named in the last CONNECTED
 
     @property
@@ -162,21 +168,38 @@ class VARAModem(QObject):
 
     def initialize_modem(self, callsign: str, is_hf: bool,
                          bandwidth: int = 500, query_version: bool = False,
-                         session: str = "", **_unused):
+                         session: str = "", wait_replies: bool = False,
+                         **_unused):
         """Send the VARA initialization commands. Call after modem_connected.
 
         *session* ("P2P" / "WINLINK") goes out as ``<session> SESSION``
-        (VARA HF only).  Unknown keyword arguments are ignored, so the
-        window can pass every modem the same ones.
+        (VARA HF only).  With *wait_replies* (Aether HF, which answers every
+        command with OK or WRONG, in order) ``MYCALL`` and ``BW`` wait for
+        their answer, and a WRONG to either stops the setup with
+        ``init_refused`` instead of letting the call go out anyway.
+        Unknown keyword arguments are ignored, so the window can pass every
+        modem the same ones.
         """
         t = threading.Thread(target=self._do_init,
                              args=(callsign, is_hf, bandwidth, query_version,
-                                   session),
+                                   session, wait_replies),
                              daemon=True, name="ModemInit")
         t.start()
 
+    def _send_and_wait(self, cmd: str, timeout: float = REPLY_TIMEOUT) -> Optional[str]:
+        """Send *cmd* and wait for its OK / WRONG; None on no answer."""
+        self._reply = None
+        self._reply_wait = threading.Event()
+        try:
+            self._send_cmd(cmd)
+            self._reply_wait.wait(timeout=timeout)
+            return self._reply
+        finally:
+            self._reply_wait = None
+
     def _do_init(self, callsign: str, is_hf: bool, bandwidth: int,
-                 query_version: bool = False, session: str = ""):
+                 query_version: bool = False, session: str = "",
+                 wait_replies: bool = False):
         self._set_state(ConnectionState.INITIALIZING)
         try:
             time.sleep(0.3)
@@ -196,17 +219,40 @@ class VARAModem(QObject):
                 self._init_ack = None
 
             # 1. Register callsign
-            self._send_cmd(f"MYCALL {callsign}")
-            time.sleep(1.0)
+            if wait_replies:
+                # Aether HF refuses a callsign its link layer cannot carry
+                # (A-Z 0-9 - /, at most nine characters)
+                if self._send_and_wait(f"MYCALL {callsign}") == "WRONG":
+                    self._refuse_init(
+                        f"The modem refused the callsign {callsign}: Aether HF "
+                        "takes A-Z, 0-9, - and /, at most nine characters.")
+                    return
+            else:
+                self._send_cmd(f"MYCALL {callsign}")
+                time.sleep(1.0)
 
             # 2. Disable compression
             self._send_cmd("COMPRESSION OFF")
-            time.sleep(1.0)
+            time.sleep(0.3 if wait_replies else 1.0)
 
             # 3. HF bandwidth
             if is_hf and bandwidth in (500, 2300, 2750):
-                self._send_cmd(f"BW{bandwidth}")
-                time.sleep(1.0)
+                if wait_replies:
+                    # Aether HF answers OK once it runs the bandwidth, or
+                    # WRONG when a session, call or transmission is under
+                    # way.  Refused, the call would still go out in the
+                    # bandwidth the modem runs — a 2300 Hz call on a 500 Hz
+                    # frequency, for one — so it stops here.
+                    if self._send_and_wait(f"BW{bandwidth}") == "WRONG":
+                        self._refuse_init(
+                            f"The modem could not move to {bandwidth} Hz now "
+                            "(it is busy with a session, a call or a "
+                            "transmission). The call was not sent; try again "
+                            "when Aether HF is idle.")
+                        return
+                else:
+                    self._send_cmd(f"BW{bandwidth}")
+                    time.sleep(1.0)
 
             # 3b. VARA HF retry cycle: P2P for a BBS/station, WINLINK for
             #     a Winlink gateway (VARA's TNC command reference)
@@ -226,6 +272,14 @@ class VARAModem(QObject):
         except Exception as e:
             log.error(f"Init failed: {e}")
             self.error_signal.emit(f"Modem initialization failed: {e}")
+
+    def _refuse_init(self, why: str):
+        """End the setup after a refused command: say why, send no CONNECT."""
+        log.warning(f"Init refused: {why}")
+        # init_refused first, so the window drops the call before the
+        # MODEM_CONNECTED that would otherwise send the CONNECT
+        self.init_refused.emit(why)
+        self._set_state(ConnectionState.MODEM_CONNECTED)
 
     # ── RF Connect / Disconnect ────────────────────────────────────
 
@@ -247,6 +301,15 @@ class VARAModem(QObject):
         """Request RF disconnection."""
         self._set_state(ConnectionState.DISCONNECTING)
         self._send_cmd("DISCONNECT")
+
+    def rf_abort(self):
+        """End the session now (VARA's ABORT): no orderly close.
+
+        The modem still answers with DISCONNECTED, which ends the session
+        here as usual.
+        """
+        self._set_state(ConnectionState.DISCONNECTING)
+        self._send_cmd("ABORT")
 
     # ── Send data over RF ──────────────────────────────────────────
 
@@ -354,14 +417,26 @@ class VARAModem(QObject):
         """Parse a VARA modem event and emit appropriate signals."""
         upper = event.upper()
 
-        # During init cleanup, suppress the expected WRONG/DISCONNECTED/PTT
-        # responses from the cleanup DISCONNECT command.
+        # During init cleanup, suppress the expected WRONG/DISCONNECTED/OK
+        # responses from the cleanup DISCONNECT command.  PTT lines are
+        # never swallowed: a modem keyed by this program (VARA HF, or Aether
+        # HF on "host program" keying) needs the radio keyed for whatever
+        # it sends meanwhile, and PTT OFF must always unkey it.  PTT OFF
+        # still ends the wait, as VARA may answer with nothing else.
         if self._init_cleanup:
-            if upper in ("WRONG", "DISCONNECTED", "OK") or upper.startswith("PTT"):
+            if upper in ("WRONG", "DISCONNECTED", "OK"):
                 log.debug(f"Init cleanup — suppressed: {event}")
                 if self._init_ack:
                     self._init_ack.set()
                 return
+            if upper == "PTT OFF" and self._init_ack:
+                self._init_ack.set()
+
+        # A command waiting for its answer (Aether HF's setup) takes it
+        waiter = self._reply_wait          # read once: the init thread clears it
+        if waiter is not None and upper in ("OK", "WRONG"):
+            self._reply = upper
+            waiter.set()
 
         self.command_event.emit(event)
 

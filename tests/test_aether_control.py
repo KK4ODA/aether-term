@@ -82,3 +82,54 @@ def test_find_aether_exe_default_location(home):
     exe.write_bytes(b"")
     assert find_aether_exe("") == str(exe)
     assert find_aether_exe(r"C:\nowhere\aether-hf.exe") == str(exe)
+
+
+def test_snapshot_reads_host_port_claims_and_keying(aetherd):
+    from aether.control import AetherControl
+    aetherd.state.update(other_host=["W1ABC"], ptt_kind="host")
+    st = AetherControl(aetherd.control_url).snapshot(with_keying=True)
+    assert st.host_port == aetherd.cmd_port
+    assert st.host_callsigns == ["W1ABC"] and st.host_connected
+    assert st.ptt_kind == "host" and st.host_keyed is True
+
+
+def test_keying_read_from_status_when_config_get_is_unsupported(aetherd):
+    """A daemon run without a configuration file answers config.get "unsupported"."""
+    from aether.control import AetherControl
+    aetherd.state.update(config_get=False, ptt_kind="host")
+    st = AetherControl(aetherd.control_url).snapshot(with_keying=True)
+    assert st.ptt_kind == "" and st.host_keyed is True
+    aetherd.state["ptt_kind"] = "cat"
+    st = AetherControl(aetherd.control_url).snapshot(with_keying=True)
+    assert st.host_keyed is False
+
+
+def test_setup_mismatches(aetherd):
+    from aether.control import AetherControl, setup_mismatches, double_keying
+    client = AetherControl(aetherd.control_url)
+    st = client.snapshot(with_keying=True)
+    assert setup_mismatches(st, aetherd.cmd_port, host_ptt=False) == []
+    # Aether HF listening on another port than Aether Term calls
+    found = setup_mismatches(st, 8300, host_ptt=False)
+    assert len(found) == 1 and f"host port is {aetherd.cmd_port}" in found[0]
+    assert setup_mismatches(st, 8300, host_ptt=False, local=False) == []
+    # Aether HF keys the radio itself, and Aether Term would too
+    assert "Only one program" in double_keying(st, host_ptt=True)
+    assert double_keying(st, host_ptt=False) == ""
+    # Aether HF leaves keying to the program, and Aether Term would not key
+    aetherd.state["ptt_kind"] = "host"
+    st = client.snapshot(with_keying=True)
+    found = setup_mismatches(st, aetherd.cmd_port, host_ptt=False)
+    assert len(found) == 1 and "nothing would key the radio" in found[0]
+    assert setup_mismatches(st, aetherd.cmd_port, host_ptt=True) == []
+    assert double_keying(st, host_ptt=True) == ""
+
+
+def test_another_air_is_a_problem(aetherd):
+    """Aether FM (later) says its air in status; Aether HF mode needs HF."""
+    from aether.control import AetherControl
+    aetherd.state["air"] = "fm"
+    st = AetherControl(aetherd.control_url).snapshot()
+    assert any('"fm" air' in p for p in st.problems), st.problems
+    aetherd.state["air"] = "hf"
+    assert AetherControl(aetherd.control_url).snapshot().problems == []
