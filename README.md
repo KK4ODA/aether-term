@@ -11,6 +11,23 @@ such as the one built into a Kenwood TH-D74/D75, over Bluetooth, USB or TCP.
 > settings, saved station passwords and Hamlib download are carried over automatically the
 > first time Aether Term starts (see [Upgrading from VARA Term](#upgrading-from-vara-term)).
 
+## Screenshots
+
+![Aether Term connected to the board N0CALL-10: the board's banner, then the automatic HMAC login and the board's notices](docs/screenshots/term-login.png)
+
+*Connected and logged in. Aether Term answered the board's challenge itself, so the password
+never went over the air.*
+
+![The same session: L lists the messages for N1TEST, and R 1 reads the first one](docs/screenshots/term-session.png)
+
+*`L` lists your messages and `R 1` reads the first. The buttons under the command line send
+the common commands.*
+
+Made in [local test mode](#local-test-no-radio) against a real
+[Aether BBS](https://github.com/KK4ODA/aether-bbs) on the same PC, with placeholder callsigns:
+nothing was transmitted. `python tools/screens.py` makes these pictures again, with Aether BBS
+checked out beside this repository.
+
 ## Features
 
 - Connect to BBS stations over Aether HF, VARA HF, VARA FM, AGWPE packet, or a KISS TNC
